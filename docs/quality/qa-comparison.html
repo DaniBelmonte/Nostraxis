@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nostraxis design QA comparison</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #02070b; font: 12px Inter, system-ui, sans-serif; color: #dce8f0; }
+      header { height: 42px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 0 12px; border-bottom: 1px solid #263b4a; }
+      header span:last-child { padding-left: 10px; }
+      main { display: grid; grid-template-columns: 1fr 1fr; width: 100%; height: calc(100% - 42px); gap: 1px; background: #263b4a; }
+      .frame { position: relative; overflow: hidden; background: #08131d; }
+      img { display: block; width: 100%; height: auto; }
+      iframe { width: 1440px; height: 1024px; border: 0; transform-origin: top left; transform: scale(.5); }
+    </style>
+  </head>
+  <body>
+    <header><span>Source visual · 1440 × 1024</span><span>Browser implementation · 1440 × 1024</span></header>
+    <main>
+      <div class="frame"><img src="../dashboard-overview.png" alt="Selected Nostraxis design reference" /></div>
+      <div class="frame"><iframe src="/" title="Nostraxis implementation"></iframe></div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Nostraxis">
+  <rect width="64" height="64" rx="14" fill="#08131d"/>
+  <path d="M14 48V16l18 28V16h8v32H30L22 35v13z" fill="#e8f4ff"/>
+  <path d="M45 18h5v5h-5zm0 23h5v5h-5z" fill="#47b3ff"/>
+</svg>

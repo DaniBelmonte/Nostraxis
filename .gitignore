@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.nostraxis/
+.agent-dashboard/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.swp
+*.swo
+coverage/
