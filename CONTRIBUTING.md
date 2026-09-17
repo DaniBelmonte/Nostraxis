@@ -21,7 +21,6 @@ Requirements:
 Install and start the local dashboard:
 
 ```bash
-npm ci
 npm run dev
 ```
 
