@@ -12,7 +12,6 @@ ChatGPT/Codex · Claude Code · GitHub Copilot CLI — without sending your hist
 [![Vite](https://img.shields.io/badge/Vite-6-646cff?style=flat-square&logo=vite&logoColor=white)](https://vite.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite-003b57?style=flat-square&logo=sqlite&logoColor=white)](https://nodejs.org/api/sqlite.html)
 [![Local-first](https://img.shields.io/badge/local--first-no%20telemetry-2ea043?style=flat-square)](#privacy-and-data-boundaries)
-[![CI](https://img.shields.io/github/actions/workflow/status/DaniBelmonte/Nostraxis/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/DaniBelmonte/Nostraxis/actions/workflows/ci.yml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff69b4?style=flat-square)](CONTRIBUTING.md)
 
 [![Stars](https://img.shields.io/github/stars/DaniBelmonte/Nostraxis?style=flat-square&logo=github)](https://github.com/DaniBelmonte/Nostraxis/stargazers)
@@ -76,7 +75,7 @@ It is designed for two ways of working:
 From the repository root:
 
 ```bash
-npm ci
+npm install
 npm run dev
 ```
 

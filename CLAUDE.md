@@ -11,7 +11,7 @@ No build step for the server: plain ESM on Node.js 22.5+, zero runtime dependenc
 ## Commands
 
 ```bash
-npm ci                      # install
+npm install                 # install
 npm run dev                 # dev server + Vite middleware at http://localhost:4173
 npm start                   # production server (needs npm run build first)
 npm run build               # vite build + scripts/prepare-sites-build.mjs
