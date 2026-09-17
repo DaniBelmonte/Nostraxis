@@ -23,6 +23,7 @@ Install and start the local dashboard:
 ```bash
 npm install
 npm run dev
+npm run dev
 ```
 
 The app is available at <http://localhost:4173>. Use isolated demo data for visual work:
