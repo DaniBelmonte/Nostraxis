@@ -26,6 +26,29 @@ async function readBody(req) {
   return JSON.parse(body || '{}');
 }
 
+const safeMethod = (method) => method === 'GET' || method === 'HEAD';
+
+// Reaching 127.0.0.1 is the only authorization this API has, and any page the
+// browser loads can reach it. Browser-originated requests must therefore prove
+// they came from the dashboard itself. Fetch metadata and Origin protect every
+// route, including reads with side effects; unsafe methods additionally require
+// JSON, which rules out forms and simple cross-origin requests.
+function crossSiteRejection(req) {
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') return 'Cross-site requests are not allowed.';
+  const origin = req.headers.origin;
+  if (origin) {
+    let host;
+    try { host = new URL(origin).host; }
+    catch { return 'Origin not allowed.'; }
+    if (!host || host !== req.headers.host) return 'Origin not allowed.';
+  }
+  if (safeMethod(req.method)) return null;
+  const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (contentType !== 'application/json') return 'Content-Type must be application/json.';
+  return null;
+}
+
 const matchId = (pathname, prefix, suffix = '') => {
   if (!pathname.startsWith(prefix) || (suffix && !pathname.endsWith(suffix))) return null;
   const value = pathname.slice(prefix.length, suffix ? -suffix.length : undefined);
@@ -55,6 +78,8 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
       const url = new URL(req.url, 'http://localhost');
       const route = url.pathname;
       if (!route.startsWith('/api/')) return false;
+      const rejection = crossSiteRejection(req);
+      if (rejection) { json(res, 403, { error: rejection }); return true; }
       try {
         if (req.method === 'GET' && route === '/api/stream') {
           res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -80,13 +105,12 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
           });
           return true;
         }
-        if (req.method === 'GET' && route === '/api/provider-usage') {
+        if (req.method === 'POST' && route === '/api/provider-usage') {
           await providersReady;
-          const from = url.searchParams.get('from');
-          const to = url.searchParams.get('to');
+          const { from = null, to = null, refresh = false } = await readBody(req);
           if (from || to) await externalSessions.sync();
           json(res, 200, await providerUsage.get({
-            force: url.searchParams.get('refresh') === '1',
+            force: refresh === true,
             from, to,
           }));
           return true;
@@ -98,8 +122,6 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
           json(res, 200, repositories.list()); return true;
         }
         if (req.method === 'POST' && route === '/api/repositories/pick') {
-          const origin = req.headers.origin;
-          if (origin && new URL(origin).host !== req.headers.host) throw new Error('Origin not allowed.');
           json(res, 200, await chooseRepositoryFolder()); return true;
         }
         if (req.method === 'POST' && route === '/api/session-sources/sync') {

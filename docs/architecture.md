@@ -41,6 +41,7 @@ Everything in the flow lives in this repository. Provider CLIs are child process
 - External logs never claim reproducibility when the provider omits full context; unavailable context is recorded explicitly in the snapshot.
 - Runtime writes are disabled unless a run explicitly enables them.
 - The HTTP server binds to `127.0.0.1` and rejects unexpected Host headers.
+- Binding to loopback does not stop a web page from reaching the API through the browser, so cross-site fetch metadata and a mismatched `Origin` are rejected with 403 before every route. Non-`GET`/`HEAD` requests must also use `application/json`; routes that trigger synchronization or provider refreshes use `POST`.
 
 ## Adding an integration
 

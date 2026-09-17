@@ -33,6 +33,7 @@ src/ (React)  ->  server/api.mjs (JSON + SSE)  ->  services  ->  server/persiste
 | Boundary | Location | Contract |
 | --- | --- | --- |
 | HTTP entry | `server/start.mjs` | Binds `127.0.0.1`, Host allowlist, static `dist/client` in production |
+| API guard | `server/api.mjs` | Same-origin browser check on every API request; JSON required for unsafe methods |
 | API | `server/api.mjs` | All `/api/*` routes and `/api/stream` SSE |
 | Providers | `server/providers/` | Adapter with `build`, `parse`, capabilities; registered in `index.mjs` |
 | Events | `server/core/normalized-events.mjs` | Stable `agent.*` names; all provider payloads pass through here |
@@ -51,6 +52,7 @@ Read [docs/architecture.md](docs/architecture.md) before changing a boundary. [A
 - **Provider-specific logic stays at the adapter boundary** in `server/providers/` and `server/sources/`. Everything downstream works on normalized events only.
 - **No credentials are stored.** Authentication stays in each provider's official CLI.
 - **Local only.** The server binds `127.0.0.1` and rejects unexpected `Host` headers; do not widen this.
+- **Browser requests are same-origin only.** `crossSiteRejection` in `server/api.mjs` rejects cross-site fetch metadata and a foreign `Origin` on every API route. Non-`GET`/`HEAD` requests must also send `Content-Type: application/json`. The API has no credentials, so this guard is what stops any visited web page from driving it. Never bypass it for a new route, and keep `src/api.js` sending JSON.
 - **Runtime writes are disabled** unless a run explicitly enables them.
 - **Standalone.** Ideas may be copied from Agent Café, but never import its runtime modules.
 - **English for all dashboard-owned strings** (navigation, labels, statuses, empty states, generated metadata). Preserve the original language of user prompts and provider payloads.

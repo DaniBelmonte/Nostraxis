@@ -25,11 +25,11 @@ Do not attach real agent histories, access tokens, prompts from private projects
 
 ## Local trust model
 
-Nostraxis is designed to bind to `127.0.0.1`, reject unexpected host headers and keep its SQLite data on the local machine. It still processes sensitive local information:
+Nostraxis is designed to bind to `127.0.0.1`, reject unexpected host headers, refuse cross-site browser requests to every API endpoint, require JSON for unsafe methods and keep its SQLite data on the local machine. It still processes sensitive local information:
 
 - agent conversation histories;
 - repository paths and Git metadata;
 - commands and file activity from managed runs;
 - short-lived provider usage responses.
 
-Only run Nostraxis on a machine and user account you trust. Review the **Commands** and **Writes** permissions before launching a managed session. Keep the dashboard, its data directory and registered repositories out of shared or publicly served folders.
+The API has no credentials of its own: anything able to reach the port is trusted. The browser-origin guard does not authenticate other local processes, so a managed run can still launch an executable on behalf of whoever reaches the port. Only run Nostraxis on a machine and user account you trust. Review the **Commands** and **Writes** permissions before launching a managed session. Keep the dashboard, its data directory and registered repositories out of shared or publicly served folders.

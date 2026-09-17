@@ -10,10 +10,7 @@ async function request(path, options) {
 
 export const api = {
   dashboard: () => request('/api/dashboard'),
-  providerUsage: (filters = {}) => {
-    const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
-    return request(`/api/provider-usage${query.size ? `?${query}` : ''}`);
-  },
+  providerUsage: (filters = {}) => request('/api/provider-usage', { method: 'POST', body: JSON.stringify(filters) }),
   pickRepository: () => request('/api/repositories/pick', { method: 'POST' }),
   run: (id) => request(`/api/runs/${encodeURIComponent(id)}`),
   runExportUrl: (id) => `/api/runs/${encodeURIComponent(id)}/export`,
