@@ -89,7 +89,7 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
         renderedPrompt: snapshot.prompt || '',
         items: [],
         reproducible: false,
-        source: 'external-session-log',
+        source: snapshot.sourceKind === 'vscode-chat' ? 'vscode-copilot-chat' : 'external-session-log',
         clipped: snapshot.clipped,
         unavailable: ['system-prompt', 'full-context', 'hidden-reasoning'],
       },
@@ -107,7 +107,10 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
       type: 'agent.observed', timestamp: run.startedAt, data: { text: `External session detected in ${snapshot.provider}` },
     });
     additions.push(...observedEvents);
-    saveEvents(run, additions, snapshot.sourceKind === 'opentelemetry' ? 'copilot-opentelemetry' : 'external-session-log');
+    const eventSource = snapshot.sourceKind === 'opentelemetry' ? 'copilot-opentelemetry'
+      : snapshot.sourceKind === 'vscode-chat' ? 'vscode-copilot-chat'
+        : 'external-session-log';
+    saveEvents(run, additions, eventSource);
     imported = store.listRuns().filter((item) => item.origin === 'external').length;
     bus.publish({ kind: 'run', run });
     return run;

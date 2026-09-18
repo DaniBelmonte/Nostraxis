@@ -3,6 +3,7 @@ import { open, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { collectCopilotOtel } from './copilot-otel.mjs';
+import { applyVscodeChatRecord, buildVscodeCopilotSnapshot, defaultVscodeChatRoots } from './vscode-copilot-chat.mjs';
 
 const MAX_RESPONSE = 250_000;
 const finite = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -364,7 +365,8 @@ export function defaultSessionSources({ copilotTelemetryRoot } = {}) {
   const sources = configured || [
     { provider: 'codex', root: path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions') },
     { provider: 'claude', root: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects') },
-    { provider: 'copilot', root: path.join(os.homedir(), '.copilot', 'session-state') },
+    { provider: 'copilot', root: path.join(process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot'), 'session-state'), label: 'GitHub Copilot CLI / Agent' },
+    ...defaultVscodeChatRoots().map((root) => ({ provider: 'copilot', root, format: 'vscode-chat', label: 'VS Code Copilot Chat' })),
   ];
   for (const root of [copilotTelemetryRoot, telemetryRoot].filter(Boolean)) {
     if (!sources.some((source) => source.format === 'copilot-otel' && path.resolve(source.root) === path.resolve(root))) {
@@ -408,6 +410,7 @@ export function createSessionObserver({
       try {
         const record = JSON.parse(line);
         if (target.format === 'copilot-otel') target.otelRecords.push(record);
+        else if (target.format === 'vscode-chat') target.vscodeDocument = applyVscodeChatRecord(target.vscodeDocument, record);
         else consumeObservedEvent(target.session, record);
       } catch { /* Unknown records are ignored. */ }
     }
@@ -419,6 +422,7 @@ export function createSessionObserver({
       target.session = newObservedSession(target.session.provider, target.session.filename, now());
       target.otelRecords = [];
       target.otelSignatures.clear();
+      target.vscodeDocument = null;
       target.offset = 0; target.remainder = Buffer.alloc(0);
     }
     if (info.size === target.offset) {
@@ -426,6 +430,7 @@ export function createSessionObserver({
         try {
           const record = JSON.parse(target.remainder.toString('utf8'));
           if (target.format === 'copilot-otel') target.otelRecords.push(record);
+          else if (target.format === 'vscode-chat') target.vscodeDocument = applyVscodeChatRecord(target.vscodeDocument, record);
           else consumeObservedEvent(target.session, record);
           target.remainder = Buffer.alloc(0);
           target.skipFirst = false;
@@ -450,6 +455,7 @@ export function createSessionObserver({
         try {
           const record = JSON.parse(target.remainder.toString('utf8'));
           if (target.format === 'copilot-otel') target.otelRecords.push(record);
+          else if (target.format === 'vscode-chat') target.vscodeDocument = applyVscodeChatRecord(target.vscodeDocument, record);
           else consumeObservedEvent(target.session, record);
           target.remainder = Buffer.alloc(0);
           target.skipFirst = false;
@@ -471,6 +477,7 @@ export function createSessionObserver({
           const discovered = (rootInfo.isFile()
             ? [{ filename: source.root, modified: rootInfo.mtimeMs }]
             : await discover(source.root, 0, [], isCopilot ? null : maxAgeMs, isCopilot ? Infinity : 5000))
+            .filter((item) => source.format !== 'vscode-chat' || path.basename(path.dirname(item.filename)) === 'chatSessions')
             .sort((a, b) => b.modified - a.modified);
           const files = isCopilot ? discovered : discovered.slice(0, maxFiles);
           source.count = files.length;
@@ -483,6 +490,7 @@ export function createSessionObserver({
             session: newObservedSession(source.provider, filename, now()), offset: 0,
             remainder: Buffer.alloc(0), signature: '', skipFirst: false,
             sourceId, format: source.format || 'provider-log', otelRecords: [], otelSignatures: new Map(),
+            vscodeDocument: null, vscodeImportable: false,
             });
           }
           const keep = new Set(files.map((item) => `${sourceId}:${item.filename}`));
@@ -497,6 +505,16 @@ export function createSessionObserver({
     for (const target of tracked.values()) {
       try {
         await readTarget(target);
+        if (target.format === 'vscode-chat') {
+          const result = await buildVscodeCopilotSnapshot(target.vscodeDocument, target.session.filename);
+          target.vscodeImportable = Boolean(result);
+          if (!result) continue;
+          const signature = JSON.stringify(result.snapshot);
+          if (signature === target.signature) continue;
+          await onUpdate(result.snapshot, result.events);
+          target.signature = signature;
+          continue;
+        }
         if (target.format === 'copilot-otel') {
           for (const summary of collectCopilotOtel(target.otelRecords)) {
             const snapshot = {
@@ -530,6 +548,10 @@ export function createSessionObserver({
           target.signature = signature;
         }
       } catch { /* Providers can rotate logs while they are being read. */ }
+    }
+    for (const source of status.filter((item) => item.format === 'vscode-chat' && item.available)) {
+      const sourceId = `${source.provider}:${source.format}:${source.root}`;
+      source.count = [...tracked.values()].filter((target) => target.sourceId === sourceId && target.vscodeImportable).length;
     }
     return status;
   }

@@ -11,6 +11,7 @@ import { createRepositoryService } from '../server/repositories/service.mjs';
 import { createRunManager } from '../server/runtime/run-manager.mjs';
 import { createExternalSessionService } from '../server/sources/external-session-service.mjs';
 import { collectCopilotOtel, parseCopilotUsageText } from '../server/sources/copilot-otel.mjs';
+import { buildVscodeCopilotSnapshot, defaultVscodeChatRoots, replayVscodeChat } from '../server/sources/vscode-copilot-chat.mjs';
 
 test('repository registration rejects missing and invalid paths with safe messages', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-repositories-'));
@@ -128,6 +129,83 @@ test('Copilot live checkpoints and final usage expose output tokens and premium 
   await service.close();
   store.close();
   await rm(dir, { recursive: true });
+});
+
+test('VS Code Copilot Chat journals are reconstructed and imported with local workspace usage', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-vscode-copilot-'));
+  const repositoryPath = path.join(dir, 'vscode-product');
+  const workspaceRoot = path.join(dir, 'workspaceStorage', 'workspace-hash');
+  const chatRoot = path.join(workspaceRoot, 'chatSessions');
+  const timestamp = Date.now() - 5_000;
+  await mkdir(repositoryPath);
+  await mkdir(chatRoot, { recursive: true });
+  await writeFile(path.join(workspaceRoot, 'workspace.json'), JSON.stringify({ folder: new URL(`file://${repositoryPath}`).href }));
+  const request = {
+    requestId: 'request-1', timestamp,
+    agent: { extensionId: { value: 'GitHub.copilot-chat' }, id: 'github.copilot.editsAgent' },
+    modelId: 'copilot/claude-test', message: { text: 'Review this VS Code workspace.', parts: [] }, response: [],
+  };
+  const records = [
+    { kind: 0, v: { version: 3, sessionId: 'vscode-chat-1', creationDate: timestamp, responderUsername: '', pendingRequests: [], requests: [] } },
+    { kind: 1, k: ['responderUsername'], v: 'GitHub Copilot' },
+    { kind: 2, k: ['requests'], v: [request] },
+    { kind: 1, k: ['requests', 0, 'promptTokens'], v: 600 },
+    { kind: 1, k: ['requests', 0, 'completionTokens'], v: 90 },
+    { kind: 1, k: ['requests', 0, 'copilotCredits'], v: 1.25 },
+    { kind: 2, k: ['requests', 0, 'response'], v: [
+      { kind: 'thinking', value: 'Hidden reasoning must not be imported.' },
+      { value: 'Visible VS Code Copilot response.' },
+    ] },
+  ];
+  const filename = path.join(chatRoot, 'vscode-chat-1.jsonl');
+  await writeFile(filename, records.map(JSON.stringify).join('\n'));
+
+  const replayed = replayVscodeChat(records);
+  assert.equal(replayed.requests[0].promptTokens, 600);
+  assert.equal(replayed.requests[0].response.length, 2);
+  const pendingDocument = { ...replayed, pendingRequests: [{ requestId: 'request-1' }] };
+  const recentPending = await buildVscodeCopilotSnapshot(pendingDocument, filename, new Date(timestamp + 60_000).toISOString());
+  const stalePending = await buildVscodeCopilotSnapshot(pendingDocument, filename, new Date(timestamp + 10 * 60_000).toISOString());
+  assert.equal(recentPending.snapshot.status, 'running');
+  assert.equal(recentPending.snapshot.endedAt, null);
+  assert.equal(stalePending.snapshot.status, 'completed');
+  assert.equal(stalePending.snapshot.endedAt, new Date(timestamp).toISOString());
+  assert.deepEqual(defaultVscodeChatRoots({ platform: 'darwin', home: '/Users/test', env: {} }), [
+    '/Users/test/Library/Application Support/Code/User/workspaceStorage',
+    '/Users/test/Library/Application Support/Code - Insiders/User/workspaceStorage',
+  ]);
+
+  process.env.NOSTRAXIS_SEED = '0';
+  const store = openDatabase(path.join(dir, 'data'));
+  const repositories = createRepositoryService(store);
+  const repository = await repositories.add(repositoryPath);
+  const service = createExternalSessionService({
+    store, bus: new EventBus(), repositories,
+    roots: [{ provider: 'copilot', root: path.join(dir, 'workspaceStorage'), format: 'vscode-chat', label: 'VS Code Copilot Chat' }],
+    observerOptions: { maxFiles: 10, maxAgeMs: 86_400_000 },
+  });
+  try {
+    const result = await service.sync();
+    const run = store.listRuns().find((item) => item.nativeSessionId === 'vscode-chat-1');
+    assert.equal(result.imported, 1);
+    assert.equal(run.repositoryId, repository.id);
+    assert.equal(run.repositoryPath, repositoryPath);
+    assert.equal(run.model, 'copilot/claude-test');
+    assert.equal(run.prompt, 'Review this VS Code workspace.');
+    assert.equal(run.response, 'Visible VS Code Copilot response.');
+    assert.equal(run.response.includes('Hidden reasoning'), false);
+    assert.deepEqual(run.usage, {
+      input: 600, output: 90, cached: null, reasoning: null, cost: null,
+      credits: 1.25, creditUnit: 'AI credits', creditCoverage: 'session',
+      source: 'vscode-chat', costSource: null,
+    });
+    assert.equal(run.contextSnapshot.source, 'vscode-copilot-chat');
+    assert.equal(result.sources[0].count, 1);
+  } finally {
+    await service.close();
+    store.close();
+    await rm(dir, { recursive: true });
+  }
 });
 
 test('Copilot OpenTelemetry uses invoke_agent spans once and separates subagent tokens', () => {
