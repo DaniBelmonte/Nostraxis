@@ -100,9 +100,11 @@ Não há palavras-passe nem chaves de subscrição para configurar dentro da int
 | --- | --- | --- | --- |
 | ChatGPT / Codex | Codex CLI autenticada com a tua conta ChatGPT/Codex | `~/.codex/sessions` | Que `codex` esteja na `PATH` e que tenhas criado pelo menos uma sessão local. |
 | Claude | Claude Code autenticado | `~/.claude/projects` | Que `claude auth status --json` indique uma sessão válida e que `claude` esteja na `PATH`. |
-| GitHub Copilot | GitHub Copilot CLI autenticada | `~/.copilot/session-state` | Que `copilot` esteja na `PATH`; para a quota da conta, inicia sessão também com `gh auth login`. |
+| GitHub Copilot | GitHub Copilot CLI autenticada | Sessões Copilot CLI/Agent em `${COPILOT_HOME:-$HOME/.copilot}/session-state`, mais sessões locais Copilot Chat do VS Code Stable e Insiders em `workspaceStorage` | Verifica separadamente a fonte correspondente em **Settings**; para a quota da conta, inicia sessão também com `gh auth login`. |
 
 Abre **Settings** para verificar as fontes detetadas e o estado de cada adaptador. Em **Sessions**, usa o botão de sincronização para forçar de imediato uma nova leitura dos históricos. O observador também atualiza automaticamente as fontes locais a cada poucos segundos.
+
+O estado ligado do Copilot apenas confirma que o executável ou a conta está disponível; não significa que todas as conversas locais usem o mesmo armazenamento. O Nostraxis distingue **GitHub Copilot CLI / Agent** e **VS Code Copilot Chat**. O adaptador do VS Code reconstrói os diários locais `chatSessions`, importa apenas mensagens visíveis e tokens ou créditos AI reportados e associa-os à pasta indicada pelo `workspace.json` adjacente. Os históricos de outro computador não são descarregados do GitHub. SSH remoto, Dev Container, `--user-data-dir` personalizado, VSCodium ou outras instalações podem guardar os dados noutro local; configura as respetivas raízes locais `workspaceStorage` com `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON`.
 
 Se o executável não estiver na variável `PATH`, indica-o apenas para o processo do dashboard:
 
@@ -205,6 +207,8 @@ O Nostraxis é local-first. A sua base SQLite fica por omissão em `.nostraxis/d
 
 O observador importa prompts e respostas visíveis, metadados de ferramentas e uso que a fonte tenha reportado. Não importa prompts de sistema nem raciocínio oculto. As sessões externas são de observação; não assume o controlo delas.
 
+Para o Copilot Chat do VS Code, o Nostraxis lê o diário local do editor, mas exclui entradas ocultas, instruções do agente, payloads das ferramentas e blocos de raciocínio. O formato é interno ao VS Code; registos futuros desconhecidos são ignorados em vez de inferidos.
+
 O Copilot lançado a partir do Nostraxis ativa o exportador oficial OpenTelemetry para um JSONL isolado em `.nostraxis/copilot-otel`, com a captura de conteúdo das mensagens desativada. Se quiseres enriquecer sessões Copilot externas com telemetria que já tenhas, indica o ficheiro ou diretório:
 
 ```bash
@@ -227,7 +231,9 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | `NOSTRAXIS_CODEX_BIN` | Caminho para o executável do Codex quando não está na `PATH`. |
 | `NOSTRAXIS_CLAUDE_BIN` | Caminho para o executável do Claude quando não está na `PATH`. |
 | `NOSTRAXIS_COPILOT_BIN` | Caminho para o executável do Copilot quando não está na `PATH`. |
+| `COPILOT_HOME` | Diretório de configuração e estado do Copilot. O Nostraxis lê o subdiretório `session-state` quando definido. |
 | `NOSTRAXIS_COPILOT_TOKEN` | Token de curta duração para consultar a quota pessoal do Copilot se não se usar `gh auth login`. Não é guardado. |
+| `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON` | Array JSON de raízes `workspaceStorage` adicionais ou personalizadas do VS Code; substitui os valores predefinidos desta fonte. |
 | `NOSTRAXIS_PRICING_JSON` | Tabela de preços por modelo para estimar USD. |
 | `NOSTRAXIS_EXPERIMENTS_ENABLED=1` | Ativa o R&D Lab e a sua API de experiências. |
 | `NOSTRAXIS_SESSION_ROOTS_JSON` | Substitui as localizações de histórico observadas. |
@@ -240,6 +246,7 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | Problema | Verificação e solução |
 | --- | --- |
 | Não vejo sessões de um fornecedor | Abre **Settings**, confirma que o caminho de histórico aparece como detetado, cria uma sessão com essa CLI e carrega em sincronizar em **Sessions**. |
+| Não vejo um chat Copilot do VS Code | Confirma que **VS Code Copilot Chat** aparece detetado em **Settings**. Stable e Insiders são automáticos; instalações remotas, personalizadas ou de outros editores requerem `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON`. |
 | O fornecedor aparece como indisponível | Verifica que o seu executável responde no mesmo Terminal com que arrancaste o dashboard. Se estiver noutra localização, define a variável `*_BIN` correspondente. |
 | Não consigo criar uma sessão | Regista primeiro um repositório em **Repos** e seleciona um em **New session**. O objetivo não pode estar vazio. |
 | Não aparecem custos | Configura `NOSTRAXIS_PRICING_JSON`; sem preços ou sem tokens reportados, o custo mantém-se indisponível. |
