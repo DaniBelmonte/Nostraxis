@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { GithubLogo, OpenAiLogo, X } from '@phosphor-icons/react';
+import { X } from '@phosphor-icons/react';
 import { api } from '../../../shared/api/client';
+import { AgentIcon, PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 
 const providerOrder = ['codex', 'claude', 'copilot'];
-const fallbackNames = { codex: 'Codex / ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' };
+const fallbackNames = PROVIDER_NAMES;
 const statusLabels = {
   connected: 'Connected',
   disconnected: 'No session',
@@ -36,18 +37,6 @@ const currentMonthRange = () => {
   const today = new Date();
   return { from: dayValue(new Date(today.getFullYear(), today.getMonth(), 1)), to: dayValue(today) };
 };
-
-function ClaudeLogo() {
-  return <svg className="claude-logo" viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M12 2.8v18.4M4.1 7.4l15.8 9.2M4.1 16.6l15.8-9.2M2.8 12h18.4" />
-  </svg>;
-}
-
-function ProviderLogo({ id }) {
-  if (id === 'codex') return <OpenAiLogo weight="fill" />;
-  if (id === 'claude') return <ClaudeLogo />;
-  return <GithubLogo weight="fill" />;
-}
 
 function LimitWindow({ window, now }) {
   const hasTotals = Number.isFinite(window.used) && Number.isFinite(window.limit);
@@ -138,7 +127,7 @@ export function ProviderUsageDock({ initial }) {
   return <aside className="provider-usage-dock" aria-label="AI assistant usage" ref={dockRef}>
     {providers.map((provider) => <div className={`provider-usage-item provider-${provider.id} ${openProvider === provider.id ? 'is-open' : ''}`} key={provider.id}>
       <button className="provider-logo-button" type="button" aria-label={`View ${provider.name} usage`} aria-controls={`provider-usage-${provider.id}`} aria-expanded={openProvider === provider.id} onClick={() => setOpenProvider((current) => current === provider.id ? null : provider.id)}>
-        <ProviderLogo id={provider.id} />
+        <AgentIcon id={provider.id} />
         <i className={`provider-connection-dot ${provider.connection}`} />
       </button>
       {openProvider === provider.id && <ProviderPopover provider={provider} now={now} range={range} onRangeChange={setRange} onClose={() => setOpenProvider(null)} />}

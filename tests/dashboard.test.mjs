@@ -522,6 +522,25 @@ test('SQLite store is standalone and persists exact context snapshots', async ()
   await rm(dir, { recursive: true });
 });
 
+test('listRuns carries toolCount and fileCount summarised from the run events', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-'));
+  process.env.NOSTRAXIS_SEED = '0';
+  const store = openDatabase(dir);
+  const run = { id: 'run-summary', name: 'demo', repositoryId: null, repositoryName: null, repositoryPath: dir, provider: 'custom', model: '', status: 'completed', prompt: 'Fix the bug', response: 'Done', startedAt: '2026-09-09T10:00:00.000Z', endedAt: '2026-09-09T10:00:02.000Z', updatedAt: '2026-09-09T10:00:02.000Z', usage: null, contextSnapshot: {}, evaluation: null, permissions: {}, demo: false };
+  store.saveRun(run);
+  const at = (offset) => new Date(Date.parse(run.startedAt) + offset * 1000).toISOString();
+  store.insertEvent({ runId: run.id, timestamp: at(1), type: 'agent.file_read', provider: 'custom', data: { path: 'src/a.js' } });
+  store.insertEvent({ runId: run.id, timestamp: at(2), type: 'agent.file_modified', provider: 'custom', data: { path: 'src/a.js' } });
+  store.insertEvent({ runId: run.id, timestamp: at(3), type: 'agent.file_read', provider: 'custom', data: { path: 'src/b.js' } });
+  store.insertEvent({ runId: run.id, timestamp: at(4), type: 'agent.command', provider: 'custom', data: { command: 'npm test' } });
+  store.insertEvent({ runId: run.id, timestamp: at(5), type: 'agent.command_completed', provider: 'custom', data: { command: 'npm test' } });
+  const summary = store.listRuns().find((row) => row.id === run.id);
+  assert.equal(summary.fileCount, 2);
+  assert.equal(summary.toolCount, 1);
+  store.close();
+  await rm(dir, { recursive: true });
+});
+
 test('unknown provider metrics remain unavailable instead of becoming zero', () => {
   const run = { id: 'unknown', name: 'unknown', repositoryName: 'repo', provider: 'custom', model: '', status: 'completed', startedAt: '2026-09-09T10:00:00.000Z', endedAt: '2026-09-09T10:00:01.000Z', usage: null, evaluation: null, contextSnapshot: {} };
   const analytics = buildAnalytics([run]);

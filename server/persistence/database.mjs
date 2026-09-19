@@ -190,6 +190,15 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     listExperiments: db.prepare('SELECT * FROM experiments ORDER BY created_at DESC'),
     getExperiment: db.prepare('SELECT * FROM experiments WHERE id=?'),
     variants: db.prepare('SELECT * FROM experiment_variants WHERE experiment_id=? ORDER BY rowid'),
+    runSummaries: db.prepare(`
+      SELECT run_id,
+        COUNT(DISTINCT CASE WHEN type IN ('agent.file_read','agent.file_modified')
+          THEN json_extract(data,'$.path') END) AS file_count,
+        SUM(CASE WHEN type NOT LIKE '%completed'
+          AND COALESCE(json_extract(data,'$.tool'), json_extract(data,'$.command')) IS NOT NULL
+          THEN 1 ELSE 0 END) AS tool_count
+      FROM events GROUP BY run_id
+    `),
   };
 
   const store = {
@@ -202,7 +211,13 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     saveSetting(key, value) {
       db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)').run(key, JSON.stringify(value));
     },
-    listRuns: () => statements.listRuns.all().map(runFromRow),
+    listRuns: () => {
+      const summaries = new Map(statements.runSummaries.all().map((row) => [row.run_id, row]));
+      return statements.listRuns.all().map(runFromRow).map((run) => {
+        const summary = summaries.get(run.id);
+        return { ...run, toolCount: summary?.tool_count || 0, fileCount: summary?.file_count || 0 };
+      });
+    },
     getRun: (id) => runFromRow(statements.getRun.get(id)),
     saveRun(run) {
       db.prepare(`INSERT INTO runs(
