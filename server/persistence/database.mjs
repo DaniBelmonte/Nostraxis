@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { normalizeEvents, timingFromEvents, toIsoTimestamp } from '../core/timing.mjs';
 
 const SCHEMA = `
 PRAGMA journal_mode=WAL;
@@ -38,6 +39,8 @@ CREATE TABLE IF NOT EXISTS runs(
   origin TEXT NOT NULL DEFAULT 'dashboard',
   source_path TEXT,
   usage_scope TEXT,
+  active_duration_ms INTEGER,
+  last_turn_ms INTEGER,
   FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS runs_dimensions ON runs(repository_id, provider, model, started_at);
@@ -111,6 +114,8 @@ const runFromRow = (row) => row ? ({
   external: row.origin === 'external',
   sourcePath: row.source_path || null,
   usageScope: row.usage_scope || null,
+  activeDurationMs: Number.isFinite(row.active_duration_ms) ? row.active_duration_ms : null,
+  lastTurnDurationMs: Number.isFinite(row.last_turn_ms) ? row.last_turn_ms : null,
 }) : null;
 
 const repositoryFromRow = (row) => row ? ({ id: row.id, name: row.name, path: row.path, branch: row.branch, headSha: row.head_sha, createdAt: row.created_at }) : null;
@@ -122,6 +127,46 @@ const variantFromRow = (row) => ({
   runId: row.run_id, status: row.status,
 });
 
+const ISO_PATTERN = '____-__-__T%';
+// Bumped whenever the way time is measured changes, so stored runs are
+// re-derived from their events instead of keeping a number from an older rule.
+const TIMING_MIGRATION = 2;
+
+// Instants written before they were normalised - Codex reports epoch seconds -
+// sort before every ISO timestamp and render as an unknown time.
+function repairTimestamps(db) {
+  const rewrite = (table, column) => {
+    const rows = db.prepare(`SELECT rowid AS rowid, ${column} AS value FROM ${table} WHERE ${column} IS NOT NULL AND ${column} NOT LIKE ?`).all(ISO_PATTERN);
+    const update = db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`);
+    for (const row of rows) {
+      const normalized = toIsoTimestamp(row.value, null);
+      if (normalized) update.run(normalized, row.rowid);
+    }
+  };
+  rewrite('events', 'timestamp');
+  for (const column of ['started_at', 'ended_at', 'updated_at']) rewrite('runs', column);
+  // A re-read of a source can persist the same line twice; identical events at
+  // the identical instant are one observation.
+  db.exec(`DELETE FROM events WHERE id NOT IN (
+    SELECT MIN(id) FROM events GROUP BY run_id, timestamp, type, data
+  )`);
+}
+
+// Runs stored before the turn model existed carry no measured time. Deriving
+// it once from their own events replaces the conversation span with the time
+// the agent was actually working.
+function recomputeRunTiming(db) {
+  const stored = db.prepare("SELECT value FROM settings WHERE key='timing.migration'").get();
+  if (stored && parse(stored.value, 0) >= TIMING_MIGRATION) return;
+  const events = db.prepare('SELECT timestamp, type, data FROM events WHERE run_id=? ORDER BY timestamp, id');
+  const update = db.prepare('UPDATE runs SET active_duration_ms=?, last_turn_ms=? WHERE id=?');
+  for (const row of db.prepare('SELECT id FROM runs').all()) {
+    const timing = timingFromEvents(events.all(row.id).map((event) => ({ timestamp: event.timestamp, type: event.type, data: parse(event.data, {}) })));
+    update.run(timing.activeMs, timing.lastTurnMs, row.id);
+  }
+  db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES (?,?)').run('timing.migration', JSON.stringify(TIMING_MIGRATION));
+}
+
 export function openDatabase(dataDir = path.resolve('.nostraxis')) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path.join(dataDir, 'dashboard.sqlite'));
@@ -130,6 +175,10 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
   if (!runColumns.has('origin')) db.exec("ALTER TABLE runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'dashboard'");
   if (!runColumns.has('source_path')) db.exec('ALTER TABLE runs ADD COLUMN source_path TEXT');
   if (!runColumns.has('usage_scope')) db.exec('ALTER TABLE runs ADD COLUMN usage_scope TEXT');
+  if (!runColumns.has('active_duration_ms')) db.exec('ALTER TABLE runs ADD COLUMN active_duration_ms INTEGER');
+  if (!runColumns.has('last_turn_ms')) db.exec('ALTER TABLE runs ADD COLUMN last_turn_ms INTEGER');
+  repairTimestamps(db);
+  recomputeRunTiming(db);
   const statements = {
     listRuns: db.prepare('SELECT * FROM runs ORDER BY started_at DESC'),
     getRun: db.prepare('SELECT * FROM runs WHERE id=?'),
@@ -159,8 +208,9 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
       db.prepare(`INSERT INTO runs(
         id,name,repository_id,repository_name,repository_path,provider,model,status,prompt,response,
         native_session_id,started_at,ended_at,updated_at,usage_json,context_snapshot_json,
-        evaluation_json,permissions_json,experiment_id,demo,origin,source_path,usage_scope
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        evaluation_json,permissions_json,experiment_id,demo,origin,source_path,usage_scope,
+        active_duration_ms,last_turn_ms
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, repository_id=excluded.repository_id,
         repository_name=excluded.repository_name, repository_path=excluded.repository_path,
@@ -171,24 +221,32 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
         usage_json=excluded.usage_json, context_snapshot_json=excluded.context_snapshot_json,
         evaluation_json=excluded.evaluation_json, permissions_json=excluded.permissions_json,
         experiment_id=excluded.experiment_id, demo=excluded.demo, origin=excluded.origin,
-        source_path=excluded.source_path, usage_scope=excluded.usage_scope`).run(
+        source_path=excluded.source_path, usage_scope=excluded.usage_scope,
+        active_duration_ms=excluded.active_duration_ms, last_turn_ms=excluded.last_turn_ms`).run(
         run.id, run.name, run.repositoryId || null, run.repositoryName || null,
         run.repositoryPath, run.provider, run.model || null, run.status, run.prompt || '',
-        run.response || null, run.nativeSessionId || null, run.startedAt, run.endedAt || null,
-        run.updatedAt, run.usage ? JSON.stringify(run.usage) : null,
+        run.response || null, run.nativeSessionId || null, toIsoTimestamp(run.startedAt, run.startedAt),
+        toIsoTimestamp(run.endedAt, null), toIsoTimestamp(run.updatedAt, run.updatedAt),
+        run.usage ? JSON.stringify(run.usage) : null,
         JSON.stringify(run.contextSnapshot || {}), run.evaluation ? JSON.stringify(run.evaluation) : null,
         JSON.stringify(run.permissions || {}), run.experimentId || null, run.demo ? 1 : 0,
         run.origin || 'dashboard', run.sourcePath || null, run.usageScope || null,
+        Number.isFinite(run.activeDurationMs) ? run.activeDurationMs : null,
+        Number.isFinite(run.lastTurnDurationMs) ? run.lastTurnDurationMs : null,
       );
       return run;
     },
     deleteRun: (id) => statements.deleteRun.run(id),
     insertEvent(event) {
-      const result = statements.insertEvent.run(event.runId, event.timestamp, event.type, event.provider, JSON.stringify(event.data || {}));
-      return { ...event, id: Number(result.lastInsertRowid) };
+      // Providers report instants as ISO strings, epoch seconds or epoch
+      // nanoseconds; the column only ever stores ISO-8601 so ordering and
+      // duration stay comparable across sources.
+      const timestamp = toIsoTimestamp(event.timestamp, null) || new Date().toISOString();
+      const result = statements.insertEvent.run(event.runId, timestamp, event.type, event.provider, JSON.stringify(event.data || {}));
+      return { ...event, timestamp, id: Number(result.lastInsertRowid) };
     },
     eventsFor(runId) {
-      return statements.listEvents.all(runId).map((row) => ({ id: row.id, runId: row.run_id, timestamp: row.timestamp, type: row.type, provider: row.provider, data: parse(row.data, {}) }));
+      return normalizeEvents(statements.listEvents.all(runId).map((row) => ({ id: row.id, runId: row.run_id, timestamp: row.timestamp, type: row.type, provider: row.provider, data: parse(row.data, {}) })));
     },
     listRepositories: () => statements.listRepositories.all().map(repositoryFromRow),
     getRepository: (id) => repositoryFromRow(statements.getRepository.get(id)),

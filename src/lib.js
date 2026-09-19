@@ -16,6 +16,8 @@ export const percent = (value) => Number.isFinite(value)
 
 export const duration = (value) => {
   if (!Number.isFinite(value)) return '—';
+  // A measured interval shorter than a second is not zero time.
+  if (value > 0 && value < 1000) return '<1s';
   const seconds = Math.round(value / 1000);
   return seconds >= 3600
     ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
@@ -35,16 +37,33 @@ export const statusLabel = (status) => ({
   cancelled: 'Cancelled', stopped: 'Stopped', unknown: 'Unconfirmed', idle: 'Idle', draft: 'Draft',
 }[status] || status);
 
+// Mirrors server/core/timing.mjs: the active time is what was measured from
+// the events, the conversation span is shown beside it and never in its place.
+const parseAt = (value) => {
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+export const runDurationMs = (run) => {
+  if (Number.isFinite(run?.activeDurationMs)) return run.activeDurationMs;
+  if (run?.origin === 'external') return null;
+  const startedAt = parseAt(run?.startedAt);
+  const endedAt = parseAt(run?.endedAt);
+  return startedAt != null && endedAt != null ? Math.max(0, endedAt - startedAt) : null;
+};
+
+export const totalSpanMs = (run) => {
+  const startedAt = parseAt(run?.startedAt);
+  const lastAt = parseAt(run?.endedAt || run?.updatedAt);
+  return startedAt != null && lastAt != null && lastAt > startedAt ? lastAt - startedAt : null;
+};
+
 export const metricsOf = (run) => {
   const input = Number.isFinite(run?.usage?.input) ? run.usage.input : null;
   const output = Number.isFinite(run?.usage?.output) ? run.usage.output : null;
   const cached = Number.isFinite(run?.usage?.cached) ? run.usage.cached : null;
   const explicitTotal = Number.isFinite(run?.usage?.total) ? run.usage.total : null;
   const observedTokens = Number.isFinite(run?.usage?.observedTokens) ? run.usage.observedTokens : null;
-  const durationMs = run?.endedAt
-    ? Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt))
-    : run?.demo && run?.updatedAt ? Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.startedAt))
-    : run?.status === 'running' ? Math.max(0, Date.now() - Date.parse(run.startedAt)) : null;
   return {
     input,
     output,
@@ -60,7 +79,9 @@ export const metricsOf = (run) => {
     usageSource: run?.usage?.source || null,
     contextTokens: Number.isFinite(run?.usage?.contextTokens) ? run.usage.contextTokens : null,
     contextWindowTokens: Number.isFinite(run?.usage?.contextWindowTokens) ? run.usage.contextWindowTokens : null,
-    durationMs,
+    durationMs: runDurationMs(run),
+    totalDurationMs: totalSpanMs(run),
+    lastTurnDurationMs: Number.isFinite(run?.lastTurnDurationMs) ? run.lastTurnDurationMs : null,
   };
 };
 

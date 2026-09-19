@@ -1,3 +1,5 @@
+import { runDurationMs, timingFromEvents, totalSpanMs } from '../core/timing.mjs';
+
 export const runExportSchemaVersion = '1.0';
 
 const finiteOrNull = (value) => Number.isFinite(value) ? value : null;
@@ -7,18 +9,12 @@ const eventLabel = (event) => {
   return data.text || data.command || data.path || data.tool || null;
 };
 
-const durationMs = (run) => {
-  const startedAt = Date.parse(run.startedAt || '');
-  const endedAt = Date.parse(run.endedAt || '');
-  return Number.isFinite(startedAt) && Number.isFinite(endedAt)
-    ? Math.max(0, endedAt - startedAt)
-    : null;
-};
-
 // JSON Lines keeps each observed event independently readable by stream-based
 // tools and LLM pipelines, while the first record gives the run its context.
 export function buildRunJsonl(detail, { exportedAt = new Date().toISOString() } = {}) {
-  const { run, events = [] } = detail;
+  const { run } = detail;
+  const events = detail.events || [];
+  const timing = detail.timing || timingFromEvents(events);
   const manifest = {
     recordType: 'nostraxis.run-export',
     schemaVersion: runExportSchemaVersion,
@@ -28,7 +24,10 @@ export function buildRunJsonl(detail, { exportedAt = new Date().toISOString() } 
     eventCount: events.length,
     run: {
       ...run,
-      durationMs: durationMs(run),
+      durationMs: runDurationMs(run),
+      totalDurationMs: totalSpanMs(run),
+      lastTurnDurationMs: timing.lastTurnMs,
+      turns: timing.turns,
     },
   };
   const records = [manifest];

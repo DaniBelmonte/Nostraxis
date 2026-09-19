@@ -150,7 +150,7 @@ Esto permite trabajar con Codex, Claude o Copilot sin dejar de usar un único pa
 
 Usa las pestañas para alternar entre sesiones activas, recientes y todas; los filtros permiten acotar por proyecto, proveedor, modelo, estado, origen, actividad, coste y caché. La agrupación por proyecto o por estado facilita seguir varias tareas abiertas a la vez.
 
-Al seleccionar una sesión, el panel central muestra su cronología y, cuando la fuente lo expone, tokens, coste, créditos, duración y eventos. El inspector lateral conserva el repositorio, rama, commit, prompt, herramientas y ficheros relacionados. Un valor **Not reported** o **No reportado** significa que el proveedor no lo entregó: nunca equivale a cero ni se estima silenciosamente.
+Al seleccionar una sesión, el panel central muestra su cronología y, cuando la fuente lo expone, tokens, coste, créditos, duración y eventos. La duración es el **tiempo activo**: los intervalos en los que el agente estaba reportando trabajo, medidos con las marcas de tiempo reales de los eventos. El tiempo previo a cada acción del usuario y los silencios largos quedan fuera, de modo que una conversación retomada al día siguiente no se lee como un día de ejecución. Junto a él aparecen el **intervalo de la conversación** y el **último turno**, para poder medir la última interacción por separado. El inspector lateral conserva el repositorio, rama, commit, prompt, herramientas y ficheros relacionados. Un valor **Not reported** o **No reportado** significa que el proveedor no lo entregó: nunca equivale a cero ni se estima silenciosamente.
 
 ## Comparar prompts, agentes y sesiones
 
