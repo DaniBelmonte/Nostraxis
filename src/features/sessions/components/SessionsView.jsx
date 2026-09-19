@@ -76,6 +76,12 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
     filterSelect('cost', 'Cost', ['Any', '> $1', '< $0.50']),
     filterSelect('cache', 'Cache hit', ['Any', '< 40%', '> 60%']),
   ];
+  const allCollapsed = visibleGroups.length > 0 && visibleGroups.every((group) => openGroups[group.id] === false);
+  const toggleAllGroups = () => setOpenGroups((current) => {
+    const next = { ...current };
+    visibleGroups.forEach((group) => { next[group.id] = allCollapsed; });
+    return next;
+  });
 
   return <aside className="sessions-pane">
     <div className="sessions-heading"><h1>Sessions</h1><div className="sessions-heading-actions"><button className="icon-button" onClick={sync} disabled={syncing} aria-label="Sync external sessions" title="Sync external sessions"><ArrowsClockwise className={syncing ? 'spinning' : ''} /></button><button className="secondary-button" onClick={onNewSession}>+ New session</button></div></div>
@@ -87,7 +93,14 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
         dates={dates} onDates={setDates}
         primary={primaryFilters} more={moreFilters} moreOpen={moreOpen} onToggleMore={() => setMoreOpen((value) => !value)}
       />
-      <div className="group-mode"><span>Group by</span><button className={groupMode === 'project' ? 'active' : ''} onClick={() => setGroupMode('project')}>Project</button><button className={groupMode === 'state' ? 'active' : ''} onClick={() => setGroupMode('state')}>Status</button></div>
+      <div className="group-mode">
+        <span>Group by</span>
+        <div className="group-mode-toggle">
+          <button className={groupMode === 'project' ? 'active' : ''} onClick={() => setGroupMode('project')}>Project</button>
+          <button className={groupMode === 'state' ? 'active' : ''} onClick={() => setGroupMode('state')}>Status</button>
+        </div>
+        <button type="button" className="icon-button" onClick={toggleAllGroups} disabled={!visibleGroups.length} aria-label={allCollapsed ? 'Expand all groups' : 'Collapse all groups'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <CaretRight /> : <CaretDown />}</button>
+      </div>
     </div>
     <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync Codex, Claude or Copilot, or start a session here.</span></div>}{visibleGroups.map((group) => <section key={group.id} className="session-group">
       <button className="group-heading" onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}><span>{group.label} ({group.sessions.length})</span>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}</button>
