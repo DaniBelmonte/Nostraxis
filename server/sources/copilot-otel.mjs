@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { mergedDurationMs } from '../core/timing.mjs';
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const numeric = (value) => {
@@ -118,6 +119,9 @@ function summarizeSession(session) {
   if (input == null && output == null && nanoAiu == null) return null;
   const starts = spans.map((span) => span.startedAt).filter(Number.isFinite);
   const ends = spans.map((span) => span.endedAt).filter(Number.isFinite);
+  // Spans overlap while subagents run: merging them keeps the active time to
+  // the wall-clock intervals where at least one span was executing.
+  const activeDurationMs = mergedDurationMs(spans.map((span) => [span.startedAt, span.endedAt]));
   const model = topLevel.find((span) => span.model)?.model || spans.find((span) => span.model)?.model || '';
   const observedTokens = subagentInput != null || subagentOutput != null
     ? (subagentInput || 0) + (subagentOutput || 0)
@@ -127,6 +131,7 @@ function summarizeSession(session) {
     model,
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     endedAt: ends.length ? new Date(Math.max(...ends)).toISOString() : null,
+    activeDurationMs,
     usage: {
       input,
       output,

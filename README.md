@@ -154,7 +154,7 @@ This lets you work with Codex, Claude or Copilot while keeping a single panel fo
 
 Use the tabs to switch between active, recent and all sessions; filters narrow by project, provider, model, status, origin, activity, cost and cache. Grouping by project or status makes it easier to follow several open tasks at once.
 
-When you select a session, the central panel shows its timeline and, when the source exposes it, tokens, cost, credits, duration and events. The side inspector keeps the repository, branch, commit, prompt, tools and related files. A **Not reported** value means the provider did not deliver it: it never equals zero and is never silently estimated.
+When you select a session, the central panel shows its timeline and, when the source exposes it, tokens, cost, credits, duration and events. Duration is the **active time**: the intervals where the agent was reporting work, measured from the real event timestamps. The time before each user action and any long silence are excluded, so a conversation resumed the next day is not read as a day of execution. The **conversation span** and the **last turn** appear beside it, so the latest interaction can still be measured on its own. The side inspector keeps the repository, branch, commit, prompt, tools and related files. A **Not reported** value means the provider did not deliver it: it never equals zero and is never silently estimated.
 
 ## Comparing prompts, agents and sessions
 

@@ -3,9 +3,10 @@ import path from 'node:path';
 import { createSessionObserver, defaultSessionSources } from './session-observer.mjs';
 import { mergeCopilotUsage } from './copilot-otel.mjs';
 import { withEstimatedCost } from '../metrics/cost.mjs';
+import { timingFromEvents, toIsoTimestamp } from '../core/timing.mjs';
 
 const eventKey = (runId, event) => createHash('sha256')
-  .update(`${runId}:${event.timestamp}:${event.type}:${JSON.stringify(event.data || {})}`)
+  .update(`${runId}:${toIsoTimestamp(event.timestamp, event.timestamp)}:${event.type}:${JSON.stringify(event.data || {})}`)
   .digest('hex')
   .slice(0, 24);
 
@@ -21,6 +22,19 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
     if (incomingOtel) return mergeCopilotUsage(snapshot.usage, existingOtel ? null : existing.usage);
     if (existingOtel) return mergeCopilotUsage(existing.usage, snapshot.usage);
     return snapshot.usage;
+  };
+
+  // Observed sessions are timed from their own event stream: the sum of the
+  // turns, never the span between the first and the last line of a
+  // conversation that may have been resumed days later.
+  const applyObservedTiming = (run, snapshot) => {
+    const timing = timingFromEvents(store.eventsFor(run.id));
+    // OpenTelemetry only reports model spans, so it is the fallback for
+    // sessions whose event stream carries no measurable interval.
+    run.activeDurationMs = timing.activeMs ?? (Number.isFinite(snapshot?.activeDurationMs) ? snapshot.activeDurationMs : null);
+    run.lastTurnDurationMs = timing.lastTurnMs;
+    store.saveRun(run);
+    return run;
   };
 
   const saveEvents = (run, events, source) => {
@@ -54,6 +68,7 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
         managed.updatedAt = [managed.updatedAt, snapshot.updatedAt].filter(Boolean).sort().at(-1);
         store.saveRun(managed);
         saveEvents(managed, observedEvents, 'copilot-opentelemetry');
+        applyObservedTiming(managed, snapshot);
         bus.publish({ kind: 'run', run: managed });
       }
       return managed;
@@ -111,6 +126,7 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
       : snapshot.sourceKind === 'vscode-chat' ? 'vscode-copilot-chat'
         : 'external-session-log';
     saveEvents(run, additions, eventSource);
+    applyObservedTiming(run, snapshot);
     imported = store.listRuns().filter((item) => item.origin === 'external').length;
     bus.publish({ kind: 'run', run });
     return run;

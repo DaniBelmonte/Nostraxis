@@ -1,10 +1,13 @@
+import { runDurationMs, totalSpanMs } from '../core/timing.mjs';
+
 export const metricDefinitions = [
   { id: 'tokens', label: 'Total tokens', unit: 'tokens', source: 'provider' },
   { id: 'cachedTokens', label: 'Cached input', unit: 'tokens', source: 'provider' },
   { id: 'cacheHit', label: 'Cache hit', unit: 'ratio', source: 'derived' },
   { id: 'cost', label: 'Estimated cost', unit: 'USD', source: 'provider-or-configured-estimate' },
   { id: 'providerCredits', label: 'Provider credits', unit: 'provider-defined', source: 'provider' },
-  { id: 'duration', label: 'Duration', unit: 'ms', source: 'clock' },
+  { id: 'duration', label: 'Active duration', unit: 'ms', source: 'event-timestamps' },
+  { id: 'totalSpan', label: 'Conversation span', unit: 'ms', source: 'event-timestamps' },
   { id: 'evaluation', label: 'Evaluation score', unit: 'ratio', source: 'evaluator' },
 ];
 
@@ -35,11 +38,9 @@ export function metricsOf(run) {
     usageSource: run.usage?.source || null,
     contextTokens: Number.isFinite(run.usage?.contextTokens) ? run.usage.contextTokens : null,
     contextWindowTokens: Number.isFinite(run.usage?.contextWindowTokens) ? run.usage.contextWindowTokens : null,
-    durationMs: run.endedAt
-      ? Math.max(0, Date.parse(run.endedAt) - Date.parse(run.startedAt))
-      : run.demo && run.updatedAt
-        ? Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.startedAt))
-        : run.status === 'running' ? Math.max(0, Date.now() - Date.parse(run.startedAt)) : null,
+    durationMs: runDurationMs(run),
+    totalDurationMs: totalSpanMs(run),
+    lastTurnDurationMs: Number.isFinite(run.lastTurnDurationMs) ? run.lastTurnDurationMs : null,
     evaluationScore: Number.isFinite(run.evaluation?.score) ? run.evaluation.score : null,
   };
 }
@@ -106,7 +107,7 @@ export function compareRuns(runs) {
     evaluation: run.evaluation,
     contextDigest: run.contextSnapshot?.digest || null,
     unavailable: metricDefinitions.filter((definition) => {
-      const map = { tokens: 'totalTokens', cachedTokens: 'cachedTokens', cacheHit: 'cacheHit', cost: 'costUsd', providerCredits: 'providerCredits', duration: 'durationMs', evaluation: 'evaluationScore' };
+      const map = { tokens: 'totalTokens', cachedTokens: 'cachedTokens', cacheHit: 'cacheHit', cost: 'costUsd', providerCredits: 'providerCredits', duration: 'durationMs', totalSpan: 'totalDurationMs', evaluation: 'evaluationScore' };
       return metricsOf(run)[map[definition.id]] == null;
     }).map((definition) => definition.id),
   }));

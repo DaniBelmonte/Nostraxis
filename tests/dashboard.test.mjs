@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openDatabase } from '../server/persistence/database.mjs';
@@ -12,6 +13,211 @@ import { createRunManager } from '../server/runtime/run-manager.mjs';
 import { createExternalSessionService } from '../server/sources/external-session-service.mjs';
 import { collectCopilotOtel, parseCopilotUsageText } from '../server/sources/copilot-otel.mjs';
 import { buildVscodeCopilotSnapshot, defaultVscodeChatRoots, replayVscodeChat } from '../server/sources/vscode-copilot-chat.mjs';
+import { consumeObservedEvent, newObservedSession } from '../server/sources/session-observer.mjs';
+import { normalizeEvents, runDurationMs, timingFromEvents, totalSpanMs } from '../server/core/timing.mjs';
+
+
+const at = (base, offsetMs) => new Date(Date.parse(base) + offsetMs).toISOString();
+
+test('a session is timed by its working intervals, not by the span of the conversation', () => {
+  const base = '2026-09-16T10:47:38.000Z';
+  const events = [
+    { type: 'agent.observed', timestamp: base, data: { text: 'External session detected in copilot' } },
+    { type: 'agent.input', timestamp: base, data: { text: 'Build the inventory', userAction: true } },
+  ];
+  // Copilot closes every assistant message with a turn_end, so a session is a
+  // long chain of thinking/output/completed triples with no idle in between.
+  for (let minute = 1; minute <= 76; minute += 1) {
+    events.push({ type: 'agent.thinking', timestamp: at(base, minute * 60_000 - 30_000), data: { text: 'Preparing response' } });
+    events.push({ type: 'agent.output', timestamp: at(base, minute * 60_000 - 1_000), data: { text: 'Agent response' } });
+    events.push({ type: 'agent.completed', timestamp: at(base, minute * 60_000), data: { text: 'Turn completed' } });
+  }
+  // Copilot writes its shutdown records when the terminal is finally closed,
+  // more than a day after the work ended.
+  events.push({ type: 'agent.usage', timestamp: at(base, 33 * 3_600_000), data: { text: 'Final Copilot usage reported' } });
+  events.push({ type: 'agent.completed', timestamp: at(base, 33 * 3_600_000), data: { text: 'Session completed' } });
+
+  const timing = timingFromEvents(events);
+  assert.equal(timing.turnCount, 1);
+  assert.equal(timing.activeMs, 76 * 60_000);
+  assert.equal(timing.lastTurnMs, 76 * 60_000);
+  assert.equal(timing.totalMs, 33 * 3_600_000);
+});
+
+test('subagent prompts do not open a turn and do not stop the clock', () => {
+  const base = '2026-09-16T10:47:38.000Z';
+  const events = [
+    { type: 'agent.input', timestamp: base, data: { text: 'Analyse the scene', userAction: true } },
+    { type: 'agent.output', timestamp: at(base, 60_000), data: { text: 'Launching the analysts' } },
+    { type: 'agent.tool_started', timestamp: at(base, 60_100), data: { text: 'task', tool: 'task' } },
+    { type: 'agent.input', timestamp: at(base, 60_200), data: { text: 'Run your FUNCTIONALITY analysis', userAction: false } },
+    { type: 'agent.input', timestamp: at(base, 60_300), data: { text: 'Run your LIFECYCLE analysis', userAction: false } },
+    { type: 'agent.output', timestamp: at(base, 180_000), data: { text: 'Both analysts finished' } },
+  ];
+
+  const timing = timingFromEvents(events);
+  assert.equal(timing.turnCount, 1);
+  assert.equal(timing.activeMs, 180_000);
+});
+
+test('the time before a user action belongs to the user, whatever its length', () => {
+  const base = '2026-09-19T09:54:06.000Z';
+  const events = [
+    { type: 'agent.input', timestamp: base, data: { text: 'Fix the duration', userAction: true } },
+    { type: 'agent.output', timestamp: at(base, 600_000), data: { text: 'Working on it' } },
+    { type: 'agent.completed', timestamp: at(base, 1_141_000), data: { text: 'Turn completed' } },
+    // The user reads the answer for eighteen minutes before acting again.
+    { type: 'agent.input', timestamp: at(base, 2_249_000), data: { text: 'npm run dev', userAction: true } },
+    { type: 'agent.output', timestamp: at(base, 2_253_000), data: { text: 'Port already in use' } },
+  ];
+
+  const timing = timingFromEvents(events);
+  assert.equal(timing.turnCount, 2);
+  assert.equal(timing.activeMs, 1_141_000 + 4_000);
+  assert.equal(timing.lastTurnMs, 4_000);
+  assert.equal(timing.totalMs, 2_253_000);
+});
+
+test('providers report a user action differently and each adapter marks it', () => {
+  const codex = newObservedSession('codex', '/tmp/codex.jsonl', Date.parse('2026-09-18T08:00:00.000Z'));
+  consumeObservedEvent(codex, { type: 'event_msg', timestamp: '2026-09-18T08:00:00.000Z', payload: { type: 'user_message', message: 'Review the repository.' } });
+  consumeObservedEvent(codex, { type: 'response_item', timestamp: '2026-09-18T08:00:01.000Z', payload: { type: 'message', role: 'user', content: 'Review the repository.' } });
+  consumeObservedEvent(codex, { type: 'response_item', timestamp: '2026-09-18T08:05:00.000Z', payload: { type: 'message', role: 'user', content: 'And now the tests.' } });
+
+  const claude = newObservedSession('claude', '/tmp/claude.jsonl', Date.parse('2026-09-18T08:00:00.000Z'));
+  consumeObservedEvent(claude, { type: 'user', sessionId: 'claude-1', timestamp: '2026-09-18T08:00:00.000Z', message: { content: 'Fix the bug.' } });
+  consumeObservedEvent(claude, { type: 'user', sessionId: 'claude-1', isSidechain: true, timestamp: '2026-09-18T08:00:05.000Z', message: { content: 'Explore the repository.' } });
+
+  const copilot = newObservedSession('copilot', '/tmp/copilot.jsonl', Date.parse('2026-09-18T08:00:00.000Z'));
+  consumeObservedEvent(copilot, { type: 'user.message', timestamp: '2026-09-18T08:00:00.000Z', data: { content: 'Build the inventory.' } });
+  consumeObservedEvent(copilot, { type: 'user.message', agentId: 'agent-1', timestamp: '2026-09-18T08:00:05.000Z', data: { content: 'Run your analysis.' } });
+
+  const inputs = (session) => session.events.filter((event) => event.type === 'agent.input').map((event) => event.data.userAction);
+  // The Codex response item repeating a reported message is the transcript
+  // copy; a message it never reported as an event is a real user action.
+  assert.deepEqual(inputs(codex), [true, false, true]);
+  assert.deepEqual(inputs(claude), [true, false]);
+  assert.deepEqual(inputs(copilot), [true, false]);
+});
+
+test('provider instants are normalised, ordered and deduplicated before they are measured', () => {
+  const events = [
+    { type: 'agent.completed', timestamp: 1789646460, data: { text: 'Turn completed' } },
+    { type: 'agent.input', timestamp: '2026-09-17T12:00:00.000Z', data: { text: 'Do the thing', userAction: true } },
+    { type: 'agent.thinking', timestamp: '1789646400.0', data: { text: 'Preparing response' } },
+    { type: 'agent.thinking', timestamp: 1789646400000, data: { text: 'Preparing response', source: 're-read' } },
+    { type: 'agent.log', timestamp: 'not-a-date', data: { text: 'Unreadable instant' } },
+  ];
+  const normalized = normalizeEvents(events);
+
+  // The epoch-second copy of the thinking event is the same observation as its
+  // ISO twin, so only one of them survives.
+  assert.deepEqual(normalized.map((event) => event.type), ['agent.input', 'agent.thinking', 'agent.log', 'agent.completed']);
+  // An unreadable instant keeps its place in the stream and stays unknown
+  // instead of borrowing the time of its neighbours.
+  assert.deepEqual(normalized.map((event) => event.timestamp), [
+    '2026-09-17T12:00:00.000Z', '2026-09-17T12:00:00.000Z', null, '2026-09-17T12:01:00.000Z',
+  ]);
+  assert.equal(timingFromEvents(events).activeMs, 60_000);
+});
+
+test('a session with nothing measurable reports no duration instead of zero', () => {
+  const observed = { origin: 'external', status: 'completed', startedAt: '2026-09-18T08:00:00.000Z', updatedAt: '2026-09-19T08:00:00.000Z' };
+  assert.equal(runDurationMs(observed), null);
+  assert.equal(totalSpanMs(observed), 24 * 60 * 60 * 1000);
+  assert.equal(runDurationMs({ ...observed, activeDurationMs: 4_000 }), 4_000);
+  assert.equal(timingFromEvents([{ type: 'agent.input', timestamp: '2026-09-18T08:00:00.000Z' }]).activeMs, null);
+  assert.equal(timingFromEvents([]).activeMs, null);
+  assert.equal(timingFromEvents([]).totalMs, null);
+});
+
+test('legacy epoch instants and duplicated events are repaired when the database opens', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'nostraxis-timestamps-'));
+  process.env.NOSTRAXIS_SEED = '0';
+  const dataDir = path.join(dir, 'data');
+  const store = openDatabase(dataDir);
+  store.saveRun({
+    id: 'legacy-run', name: 'Legacy', repositoryPath: dir, provider: 'codex', status: 'completed',
+    prompt: 'Review', startedAt: '2026-09-17T12:00:00.000Z', endedAt: '2026-09-17T12:01:00.000Z',
+    updatedAt: '2026-09-17T12:01:00.000Z', contextSnapshot: {}, permissions: {}, origin: 'external',
+  });
+  store.insertEvent({ runId: 'legacy-run', timestamp: '2026-09-17T12:00:00.000Z', type: 'agent.input', provider: 'codex', data: { text: 'Review' } });
+  const legacy = store.insertEvent({ runId: 'legacy-run', timestamp: '2026-09-17T12:01:00.000Z', type: 'agent.completed', provider: 'codex', data: { text: 'Turn completed' } });
+  // Rows written before instants were normalised: an epoch-second string sorts
+  // before every ISO timestamp and renders as an unknown time.
+  store.db.prepare('UPDATE events SET timestamp=? WHERE id=?').run('1789646460.0', legacy.id);
+  store.db.prepare("UPDATE runs SET ended_at='1789646460.0', updated_at='1789646460.0' WHERE id='legacy-run'");
+  store.db.prepare("INSERT INTO events(run_id,timestamp,type,provider,data) VALUES ('legacy-run','1789646460.0','agent.completed','codex',?)")
+    .run(JSON.stringify({ text: 'Turn completed' }));
+  store.db.prepare("DELETE FROM settings WHERE key='timing.migration'").run();
+  store.close();
+
+  const reopened = openDatabase(dataDir);
+  const events = reopened.eventsFor('legacy-run');
+  const run = reopened.getRun('legacy-run');
+  assert.deepEqual(events.map((event) => event.type), ['agent.input', 'agent.completed']);
+  assert.deepEqual(events.map((event) => event.timestamp), ['2026-09-17T12:00:00.000Z', '2026-09-17T12:01:00.000Z']);
+  assert.equal(run.endedAt, '2026-09-17T12:01:00.000Z');
+  // The stored run is re-measured from its own repaired events.
+  assert.equal(run.activeDurationMs, 60_000);
+  assert.equal(totalSpanMs(run), 60_000);
+  reopened.close();
+  rmSync(dir, { recursive: true });
+});
+
+test('an observed session resumed later reports active time, last turn and full span apart', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-resumed-'));
+  const repositoryPath = path.join(dir, 'resumed-api');
+  const sourceRoot = path.join(dir, 'codex-sessions');
+  await mkdir(repositoryPath);
+  await mkdir(sourceRoot);
+  const base = '2026-09-18T08:00:00.000Z';
+  const epoch = (offsetMs) => (Date.parse(base) + offsetMs) / 1000;
+  const log = [
+    { type: 'session_meta', payload: { id: 'resumed-session', cwd: repositoryPath, timestamp: epoch(0) } },
+    { type: 'turn_context', timestamp: at(base, 0), payload: { cwd: repositoryPath, model: 'gpt-test' } },
+    { type: 'event_msg', timestamp: at(base, 0), payload: { type: 'user_message', message: 'First question.' } },
+    { type: 'event_msg', timestamp: at(base, 0), payload: { type: 'task_started', started_at: epoch(0) } },
+    { type: 'response_item', timestamp: at(base, 60_000), payload: { type: 'function_call', name: 'read_file', arguments: JSON.stringify({ path: 'src/app.js' }) } },
+    { type: 'event_msg', timestamp: at(base, 120_000), payload: { type: 'agent_message', message: 'First answer.' } },
+    { type: 'event_msg', timestamp: at(base, 180_000), payload: { type: 'task_complete', completed_at: epoch(180_000) } },
+    // Six hours of silence: the conversation is resumed, it does not continue.
+    { type: 'event_msg', timestamp: at(base, 6 * 3_600_000), payload: { type: 'user_message', message: 'Second question.' } },
+    { type: 'event_msg', timestamp: at(base, 6 * 3_600_000), payload: { type: 'task_started', started_at: epoch(6 * 3_600_000) } },
+    { type: 'event_msg', timestamp: at(base, 6 * 3_600_000 + 30_000), payload: { type: 'agent_message', message: 'Second answer.' } },
+    { type: 'event_msg', timestamp: at(base, 6 * 3_600_000 + 60_000), payload: { type: 'task_complete', completed_at: epoch(6 * 3_600_000 + 60_000) } },
+  ].map((item) => JSON.stringify(item)).join('\n') + '\n';
+  await writeFile(path.join(sourceRoot, 'session.jsonl'), log);
+
+  process.env.NOSTRAXIS_SEED = '0';
+  const store = openDatabase(path.join(dir, 'data'));
+  const repositories = createRepositoryService(store);
+  await repositories.add(repositoryPath);
+  const service = createExternalSessionService({
+    store,
+    bus: new EventBus(),
+    repositories,
+    roots: [{ provider: 'codex', root: sourceRoot }],
+    observerOptions: { maxFiles: 10, maxAgeMs: 86_400_000 },
+  });
+  await service.sync();
+  // A second pass over the same log must not duplicate events or double the time.
+  await service.sync();
+  const run = store.listRuns().find((item) => item.origin === 'external');
+  const events = store.eventsFor(run.id);
+
+  assert.equal(run.activeDurationMs, 240_000);
+  assert.equal(run.lastTurnDurationMs, 60_000);
+  assert.equal(runDurationMs(run), 240_000);
+  assert.equal(totalSpanMs(run), 6 * 3_600_000 + 60_000);
+  assert.equal(timingFromEvents(events).turnCount, 2);
+  assert.equal(events.length, new Set(events.map((event) => `${event.timestamp}|${event.type}|${JSON.stringify(event.data)}`)).size);
+  // Every row of the full run carries a readable instant.
+  assert.ok(events.every((event) => Number.isFinite(Date.parse(event.timestamp))));
+  await service.close();
+  store.close();
+  await rm(dir, { recursive: true });
+});
 
 test('repository registration rejects missing and invalid paths with safe messages', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-repositories-'));
@@ -312,6 +518,25 @@ test('SQLite store is standalone and persists exact context snapshots', async ()
   const run = { id: 'run-1', name: 'demo', repositoryId: repository.id, repositoryName: repository.name, repositoryPath: repository.path, provider: 'custom', model: '', status: 'completed', prompt: 'Fix the bug', response: 'Done', startedAt: '2026-09-09T10:00:00.000Z', endedAt: '2026-09-09T10:00:02.000Z', updatedAt: '2026-09-09T10:00:02.000Z', usage: null, contextSnapshot: snapshot, evaluation: null, permissions: { readFiles: true }, demo: false };
   store.saveRun(run);
   assert.deepEqual(store.getRun('run-1').contextSnapshot, snapshot);
+  store.close();
+  await rm(dir, { recursive: true });
+});
+
+test('listRuns carries toolCount and fileCount summarised from the run events', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-'));
+  process.env.NOSTRAXIS_SEED = '0';
+  const store = openDatabase(dir);
+  const run = { id: 'run-summary', name: 'demo', repositoryId: null, repositoryName: null, repositoryPath: dir, provider: 'custom', model: '', status: 'completed', prompt: 'Fix the bug', response: 'Done', startedAt: '2026-09-09T10:00:00.000Z', endedAt: '2026-09-09T10:00:02.000Z', updatedAt: '2026-09-09T10:00:02.000Z', usage: null, contextSnapshot: {}, evaluation: null, permissions: {}, demo: false };
+  store.saveRun(run);
+  const at = (offset) => new Date(Date.parse(run.startedAt) + offset * 1000).toISOString();
+  store.insertEvent({ runId: run.id, timestamp: at(1), type: 'agent.file_read', provider: 'custom', data: { path: 'src/a.js' } });
+  store.insertEvent({ runId: run.id, timestamp: at(2), type: 'agent.file_modified', provider: 'custom', data: { path: 'src/a.js' } });
+  store.insertEvent({ runId: run.id, timestamp: at(3), type: 'agent.file_read', provider: 'custom', data: { path: 'src/b.js' } });
+  store.insertEvent({ runId: run.id, timestamp: at(4), type: 'agent.command', provider: 'custom', data: { command: 'npm test' } });
+  store.insertEvent({ runId: run.id, timestamp: at(5), type: 'agent.command_completed', provider: 'custom', data: { command: 'npm test' } });
+  const summary = store.listRuns().find((row) => row.id === run.id);
+  assert.equal(summary.fileCount, 2);
+  assert.equal(summary.toolCount, 1);
   store.close();
   await rm(dir, { recursive: true });
 });

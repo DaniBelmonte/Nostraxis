@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildUsageChartPoints, paddedChartDomain } from '../src/lib.js';
+import { buildUsageChartPoints, paddedChartDomain } from '../src/shared/lib/metrics.js';
 
 test('credit chart keeps the final provider unit and coalesces duplicate timestamps', () => {
   const detail = {

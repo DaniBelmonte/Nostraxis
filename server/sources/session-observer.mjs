@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { collectCopilotOtel } from './copilot-otel.mjs';
 import { applyVscodeChatRecord, buildVscodeCopilotSnapshot, defaultVscodeChatRoots } from './vscode-copilot-chat.mjs';
+import { toIsoTimestamp } from '../core/timing.mjs';
 
 const MAX_RESPONSE = 250_000;
 const finite = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -13,7 +14,9 @@ const textOf = (value) => typeof value === 'string'
     ? value.filter((block) => ['text', 'input_text', 'output_text'].includes(block?.type)).map((block) => block.text || '').join('\n')
     : '';
 const short = (value, length = 240) => textOf(value).replace(/\s+/g, ' ').trim().slice(0, length);
-const atOf = (event, payload, fallback) => event.timestamp || payload.timestamp || fallback;
+// Codex writes epoch seconds, Claude and Copilot ISO strings. Everything the
+// dashboard stores is ISO-8601 so the timeline can be ordered and measured.
+const atOf = (event, payload, fallback) => toIsoTimestamp(event.timestamp || payload.timestamp, fallback);
 export const promptText = value => {
   const text = textOf(value).replace(/<recommended_plugins>[\s\S]*?<\/recommended_plugins>/g, '').trim();
   // Codex auto-review wraps the original user request in an untrusted evidence
@@ -32,7 +35,7 @@ export function observedSessionId(provider, nativeId) {
 export function newObservedSession(provider, filename, now = Date.now()) {
   return {
     provider, filename, nativeId: '', workspace: '', model: '', title: '', task: '', response: '',
-    initialPrompt: '', status: 'idle', startedAt: new Date(now).toISOString(), lastEventAt: null, endedAt: null,
+    initialPrompt: '', reportedUserMessage: '', status: 'idle', startedAt: new Date(now).toISOString(), lastEventAt: null, endedAt: null,
     usage: null, usageScope: 'unavailable', messages: new Map(), subagentUsage: new Map(), events: [], clipped: false,
   };
 }
@@ -169,7 +172,7 @@ export function consumeObservedEvent(session, event) {
     if (event.type === 'session_meta') {
       session.nativeId = payload.id || payload.session_id || session.nativeId;
       session.workspace = payload.cwd || session.workspace;
-      session.startedAt = payload.timestamp || at;
+      session.startedAt = toIsoTimestamp(payload.timestamp, at);
     }
     if (event.type === 'turn_context') {
       session.model = payload.model || session.model;
@@ -180,8 +183,8 @@ export function consumeObservedEvent(session, event) {
       if (usage) { session.usage = usage; session.usageScope = 'session'; record(session, 'agent.usage', at, { text: 'Usage updated', usage }); }
     }
     if (event.type === 'event_msg') {
-      if (payload.type === 'task_started') started(session, payload.started_at || at);
-      if (payload.type === 'task_complete') completed(session, payload.completed_at || at);
+      if (payload.type === 'task_started') started(session, toIsoTimestamp(payload.started_at, at));
+      if (payload.type === 'task_complete') completed(session, toIsoTimestamp(payload.completed_at, at));
       if (payload.type === 'turn_aborted') {
         session.status = 'stopped'; session.endedAt = at;
         record(session, 'agent.cancelled', at, { text: 'Turn interrupted' });
@@ -190,7 +193,8 @@ export function consumeObservedEvent(session, event) {
         session.task = promptText(payload.message);
         session.initialPrompt ||= session.task;
         session.title ||= short(session.task, 80);
-        record(session, 'agent.input', at, { text: session.task });
+        session.reportedUserMessage = session.task;
+        record(session, 'agent.input', at, { text: session.task, userAction: true });
       }
       if (payload.type === 'agent_message') {
         appendResponse(session, payload.message, true);
@@ -208,7 +212,9 @@ export function consumeObservedEvent(session, event) {
           session.initialPrompt ||= prompt;
           session.title ||= short(prompt, 80);
           session.task = prompt;
-          record(session, 'agent.input', at, { text: prompt });
+          // A response item repeating a message Codex already reported as an
+          // event is the transcript copy, not a second user action.
+          record(session, 'agent.input', at, { text: prompt, userAction: session.reportedUserMessage !== prompt });
         }
       }
       if (payload.type === 'reasoning') {
@@ -229,10 +235,13 @@ export function consumeObservedEvent(session, event) {
     session.workspace = event.cwd || session.workspace;
     if (event.type === 'user' && !event.toolUseResult) {
       const value = typeof event.message?.content === 'string' ? event.message.content : event.message?.content;
+      // A sidechain message is a subagent prompt and a meta message is injected
+      // by the harness: neither is the person acting on the session.
+      const userAction = event.isSidechain !== true && event.isMeta !== true;
       session.task = textOf(value);
       session.initialPrompt ||= session.task;
       session.title ||= short(value, 80);
-      record(session, 'agent.input', at, { text: session.task });
+      record(session, 'agent.input', at, { text: session.task, userAction });
       started(session, at);
     }
     if (event.type === 'assistant') {
@@ -269,12 +278,15 @@ export function consumeObservedEvent(session, event) {
       session.nativeId = payload.sessionId || session.nativeId;
       session.workspace = payload.context?.cwd || session.workspace;
       session.model = payload.selectedModel || session.model;
-      session.startedAt = payload.startTime || at;
+      session.startedAt = toIsoTimestamp(payload.startTime, at);
     }
     if (event.type === 'session.model_change') session.model = payload.newModel || session.model;
     if (event.type === 'user.message') {
+      // Copilot delivers subagent prompts as user messages too; only the ones
+      // without an agentId come from the person at the terminal.
+      const userAction = !event.agentId && !payload.agentId;
       session.task = textOf(payload.content); session.initialPrompt ||= session.task; session.title ||= short(payload.content, 80);
-      record(session, 'agent.input', at, { text: session.task });
+      record(session, 'agent.input', at, { text: session.task, userAction });
     }
     if (event.type === 'assistant.turn_start') started(session, at);
     if (event.type === 'tool.execution_start') tool(session, payload.toolName, payload.arguments, at);
@@ -526,6 +538,7 @@ export function createSessionObserver({
               startedAt: summary.startedAt || summary.endedAt || new Date(now()).toISOString(),
               endedAt: null, updatedAt: summary.endedAt || summary.startedAt || new Date(now()).toISOString(),
               status: 'unknown', usage: summary.usage, usageScope: 'session',
+              activeDurationMs: summary.activeDurationMs,
               sourcePath: target.session.filename, clipped: target.session.clipped,
               sourceKind: 'opentelemetry',
             };

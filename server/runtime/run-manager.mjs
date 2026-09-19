@@ -8,6 +8,7 @@ import { evaluatorFor } from '../evaluators/index.mjs';
 import { materializeContext } from '../experiments/context.mjs';
 import { withEstimatedCost } from '../metrics/cost.mjs';
 import { activityFor, validFileEvent } from '../metrics/observability.mjs';
+import { timingFromEvents } from '../core/timing.mjs';
 import { mergeCopilotUsage, parseCopilotUsageText, readCopilotOtelFile } from '../sources/copilot-otel.mjs';
 
 const MAX_OUTPUT = 250_000;
@@ -25,7 +26,15 @@ function signal(child, value) {
 export function createRunManager({ store, bus, repositories }) {
   const active = new Map();
   const copilotTelemetryDir = path.join(store.dataDir, 'copilot-otel');
-  const persist = (run) => { run.updatedAt = new Date().toISOString(); store.saveRun(run); bus.publish({ kind: 'run', run }); };
+  const persist = (run) => {
+    run.updatedAt = new Date().toISOString();
+    // Managed runs are timed like observed ones: from the events they emitted.
+    const timing = timingFromEvents(store.eventsFor(run.id));
+    run.activeDurationMs = timing.activeMs;
+    run.lastTurnDurationMs = timing.lastTurnMs;
+    store.saveRun(run);
+    bus.publish({ kind: 'run', run });
+  };
   const record = (run, entry) => {
     const event = store.insertEvent({
       runId: run.id,
@@ -272,7 +281,7 @@ export function createRunManager({ store, bus, repositories }) {
       }
     }
     const activity = activityFor(events);
-    return { run, events, commands: activity.commands, warnings: activity.warnings, files: [...fileMap.values()].map(file => ({ ...file, tokens: file.tokens || null, sensitive: activity.warnings.some(w => w.target === file.path) })).sort((a, b) => b.reads + b.writes - a.reads - a.writes), tools: [...toolMap.values()].sort((a, b) => b.count - a.count) };
+    return { run, events, timing: timingFromEvents(events), commands: activity.commands, warnings: activity.warnings, files: [...fileMap.values()].map(file => ({ ...file, tokens: file.tokens || null, sensitive: activity.warnings.some(w => w.target === file.path) })).sort((a, b) => b.reads + b.writes - a.reads - a.writes), tools: [...toolMap.values()].sort((a, b) => b.count - a.count) };
   }
 
   return {

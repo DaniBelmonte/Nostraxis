@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { compact, money } from './lib';
+import { compact, money } from '../lib/metrics';
 
 export const colors = ['#69b5ed', '#a69be8', '#70c5ac', '#ddb879', '#df929c', '#90a9bd'];
 export function ChartTooltip({ active, payload, label }) {
