@@ -41,18 +41,18 @@ src/ (React)  ->  server/api.mjs (JSON + SSE)  ->  services  ->  server/persiste
 | Discovery | `server/sources/` | Read-only import of local histories, Copilot OTel, dedup |
 | Metrics | `server/metrics/` | Nullable metric definitions, aggregation, comparison, cost |
 | Storage | `server/persistence/database.mjs` | Schema + store methods (`node:sqlite`) |
-| Frontend | `src/` | Consumes only the public API via `src/api.js` |
+| Frontend | `src/` | Consumes only the public API via `src/shared/api/client.js` |
 
 Read [docs/architecture.md](docs/architecture.md) before changing a boundary. [AGENTS.md](AGENTS.md) holds durable product and design decisions — read it before UI work and record new durable decisions there.
 
 ## Rules that are easy to get wrong
 
-- **Missing measurements stay `null`.** Never infer a missing provider metric as zero. The UI shows `—` or "Not reported" (`src/lib.js`).
+- **Missing measurements stay `null`.** Never infer a missing provider metric as zero. The UI shows `—` or "Not reported" (`src/shared/lib/metrics.js`).
 - **Provider units do not mix.** GitHub AI Credits and legacy premium requests keep their own unit and are never summed.
 - **Provider-specific logic stays at the adapter boundary** in `server/providers/` and `server/sources/`. Everything downstream works on normalized events only.
 - **No credentials are stored.** Authentication stays in each provider's official CLI.
 - **Local only.** The server binds `127.0.0.1` and rejects unexpected `Host` headers; do not widen this.
-- **Browser requests are same-origin only.** `crossSiteRejection` in `server/api.mjs` rejects cross-site fetch metadata and a foreign `Origin` on every API route. Non-`GET`/`HEAD` requests must also send `Content-Type: application/json`. The API has no credentials, so this guard is what stops any visited web page from driving it. Never bypass it for a new route, and keep `src/api.js` sending JSON.
+- **Browser requests are same-origin only.** `crossSiteRejection` in `server/api.mjs` rejects cross-site fetch metadata and a foreign `Origin` on every API route. Non-`GET`/`HEAD` requests must also send `Content-Type: application/json`. The API has no credentials, so this guard is what stops any visited web page from driving it. Never bypass it for a new route, and keep `src/shared/api/client.js` sending JSON.
 - **Runtime writes are disabled** unless a run explicitly enables them.
 - **Standalone.** Ideas may be copied from Agent Café, but never import its runtime modules.
 - **English for all dashboard-owned strings** (navigation, labels, statuses, empty states, generated metadata). Preserve the original language of user prompts and provider payloads.

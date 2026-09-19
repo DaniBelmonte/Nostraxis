@@ -3,9 +3,9 @@ import { Check, FolderOpen, Play } from '@phosphor-icons/react';
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { api } from './api';
-import { compact, credits, duration, money, percent, statusLabel, statusTone } from './lib';
-import { ChartTooltip, DateRange, CommandChart, ConnectionGraph } from './Observability';
+import { api } from '../../../shared/api/client';
+import { compact, credits, duration, money, percent, statusLabel, statusTone } from '../../../shared/lib/metrics';
+import { ChartTooltip, DateRange, CommandChart, ConnectionGraph } from '../../../shared/components/Observability';
 
 function PageShell({ eyebrow, title, description, children }) {
   return <main className="workspace-page"><header className="page-header"><div><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div></header><div className="page-scroll">{children}</div></main>;

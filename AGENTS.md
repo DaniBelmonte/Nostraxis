@@ -15,6 +15,7 @@ The Context, Metrics, and Tools inspector must remain accessible at every suppor
 ## Product decisions
 
 - The selected visual direction is design 3, the dense dark four-pane developer observability interface stored in `docs/dashboard-overview.png`.
+- The frontend is organized by product scene under `src/features`. Each scene exposes a small public API through `index.js` and groups its page, components, hooks, model, and API code in explicit subfolders as needed. Optimize for discoverability by developers who are new to JavaScript.
 - This project must remain standalone: it may copy or refactor ideas from Agent Café, but must never import Agent Café runtime modules.
 - Missing provider metrics stay unavailable and are never inferred as zero.
 - Session time is measured from the real event timestamps: the active time is the sum of the intervals between consecutive events of the same interaction. The time before a user action and any silence longer than `MAX_WORK_GAP_MS` are excluded, so a conversation resumed the next day, or a provider that writes its shutdown record when the terminal is closed, never reports days of execution. The conversation span and the last turn are reported beside the active time, never in its place, and anything unmeasurable stays `—`.

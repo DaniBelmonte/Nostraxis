@@ -1,3 +1,4 @@
+// Pure formatting and metric helpers shared across scenes.
 export const compact = (value) => Number.isFinite(value)
   ? (Math.abs(value) >= 1e6 ? `${Number((value / 1e6).toFixed(2))}M` : Math.abs(value) >= 1e3 ? `${Number((value / 1e3).toFixed(1))}k` : String(value))
   : '—';

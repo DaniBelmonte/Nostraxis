@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { GithubLogo, OpenAiLogo, X } from '@phosphor-icons/react';
-import { api } from './api';
+import { api } from '../../../shared/api/client';
 
 const providerOrder = ['codex', 'claude', 'copilot'];
 const fallbackNames = { codex: 'Codex / ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' };

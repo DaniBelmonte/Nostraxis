@@ -7,9 +7,9 @@ import {
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { buildUsageChartPoints, compact, credits, duration, formatDate, metricsOf, money, paddedChartDomain, percent, statusLabel, statusTone } from './lib';
-import { DateRange, Conversation, CommandChart } from './Observability';
-import { api } from './api';
+import { buildUsageChartPoints, compact, credits, duration, formatDate, metricsOf, money, paddedChartDomain, percent, statusLabel, statusTone } from '../../../shared/lib/metrics';
+import { DateRange, Conversation, CommandChart } from '../../../shared/components/Observability';
+import { api } from '../../../shared/api/client';
 
 function SessionRow({ session, selected, onSelect }) {
   const metrics = metricsOf(session);

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newObservedSession, consumeObservedEvent, observedSnapshot, promptText } from '../server/sources/session-observer.mjs';
 import { activityFor } from '../server/metrics/observability.mjs';
-import { compact } from '../src/lib.js';
+import { compact } from '../src/shared/lib/metrics.js';
 
 test('initial JSON conversation prompt survives subsequent turns and provides a title', () => {
   const s = newObservedSession('codex', 'fixture');

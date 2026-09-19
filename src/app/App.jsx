@@ -1,94 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIcon as Activity, ArrowsOut, ChartBar, Code, Flask, FolderOpen, Robot,
-  SlidersHorizontal, X,
-} from '@phosphor-icons/react';
-import { api } from './api';
-import { ContextPane, MainTrace, SessionsPane } from './SessionsView';
-import { ProviderUsageDock } from './ProviderUsageDock';
-import { AnalyticsView, CompareView, LabView, RepositoriesView, SettingsView } from './WorkspaceViews';
+import { Code, Robot, X } from '@phosphor-icons/react';
+import { api } from '../shared/api/client';
+import { ContextPane, MainTrace, NewRunForm, SessionsPane } from '../features/sessions';
+import { ProviderUsageDock } from '../features/provider-usage';
+import { AnalyticsView } from '../features/analytics';
+import { CompareView } from '../features/compare';
+import { LabView } from '../features/experiments';
+import { RepositoriesView } from '../features/repositories';
+import { SettingsView } from '../features/settings';
+import { AppRail } from './components/AppRail';
+import { Modal } from './components/Modal';
+import { useDashboard } from './hooks/useDashboard';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
-
-const navItems = (experimentsEnabled) => [
-  ['Sessions', Activity], ['Analytics', ChartBar], ['Compare', ArrowsOut],
-  ...(experimentsEnabled ? [['R&D Lab', Flask]] : []),
-  ['Repos', FolderOpen], ['Settings', SlidersHorizontal],
-];
-
-function useDashboard() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState('');
-  const timer = useRef(null);
-  const reload = async () => {
-    try { setData(await api.dashboard()); setError(''); }
-    catch (reason) { setError(reason.message); }
-  };
-  useEffect(() => {
-    reload();
-    const stream = new EventSource('/api/stream');
-    stream.onmessage = () => {
-      clearTimeout(timer.current);
-      timer.current = setTimeout(reload, 180);
-    };
-    return () => { clearTimeout(timer.current); stream.close(); };
-  }, []);
-  return { data, error, reload };
-}
-
-function AppRail({ active, onChange, online, experimentsEnabled }) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1_000);
-    return () => clearInterval(interval);
-  }, []);
-  const currentTime = new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).format(now);
-  return <nav className="app-rail">
-    <div className="wordmark"><strong>Nostra</strong><strong>xis</strong></div>
-    <div className="rail-items">{navItems(experimentsEnabled).map(([label, Icon]) => <button key={label} aria-label={label} title={label} className={active === label ? 'active' : ''} onClick={() => onChange(label)}><Icon weight={active === label ? 'duotone' : 'regular'} /><span>{label}</span></button>)}</div>
-    <div className="system-state"><span><i className={online ? '' : 'offline'} /> Current time</span><strong>{currentTime}</strong></div>
-  </nav>;
-}
-
-function Modal({ title, onClose, children }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}>
-    <section className="modal" role="dialog" aria-modal="true" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
-      <header><h2>{title}</h2><button onClick={onClose} aria-label="Close"><X /></button></header>
-      {children}
-    </section>
-  </div>;
-}
-
-function NewRunForm({ data, onCreated, onError }) {
-  const available = data.providers.find((provider) => provider.available)?.id || 'custom';
-  const [form, setForm] = useState({
-    repositoryId: data.repositories[0]?.id || '', provider: available, model: '',
-    name: 'Developer task', prompt: 'Inspect the repository and identify the smallest safe optimization.',
-    allowWrites: false, allowShell: true, executable: '',
-  });
-  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const submit = async (event) => {
-    event.preventDefault();
-    try { onCreated(await api.createRun(form)); }
-    catch (reason) { onError(reason.message); }
-  };
-  return <form className="modal-form" onSubmit={submit}>
-    <label>Repository<select value={form.repositoryId} onChange={(event) => update('repositoryId', event.target.value)}>{data.repositories.map((repo) => <option key={repo.id} value={repo.id}>{repo.name}</option>)}</select></label>
-    <label>Provider<select value={form.provider} onChange={(event) => update('provider', event.target.value)}>{data.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}{provider.available ? '' : ' · not detected'}</option>)}</select></label>
-    <label>Model<input value={form.model} onChange={(event) => update('model', event.target.value)} placeholder="empty = provider default" /></label>
-    {form.provider === 'custom' && <label>JSONL executable<input value={form.executable} onChange={(event) => update('executable', event.target.value)} placeholder="/absolute/path/to/runner" /></label>}
-    <label>Name<input value={form.name} onChange={(event) => update('name', event.target.value)} /></label>
-    <label>Goal<textarea value={form.prompt} onChange={(event) => update('prompt', event.target.value)} /></label>
-    <div className="permission-row"><label><input type="checkbox" checked={form.allowShell} onChange={(event) => update('allowShell', event.target.checked)} /> Commands</label><label><input type="checkbox" checked={form.allowWrites} onChange={(event) => update('allowWrites', event.target.checked)} /> Writes</label></div>
-    <button className="primary-button" disabled={!form.repositoryId}>Create session</button>
-  </form>;
-}
 
 export function App() {
   const { data, error: loadError, reload } = useDashboard();
