@@ -1,33 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowsClockwise, ArrowsOut, Brain, CaretDown, CaretRight, ChartLine, Check, Code, Copy,
-  Database, DownloadSimple, FileCode, FileText, MagnifyingGlass, Pause, Play, TerminalWindow,
+  Database, DownloadSimple, FileCode, FileText, Pause, Play, TerminalWindow,
   Warning, X,
 } from '@phosphor-icons/react';
 import {
-  CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { buildUsageChartPoints, compact, credits, duration, formatDate, metricsOf, money, paddedChartDomain, percent, statusLabel, statusTone } from '../../../shared/lib/metrics';
-import { DateRange, Conversation, CommandChart } from '../../../shared/components/Observability';
+import { Conversation, CommandChart } from '../../../shared/components/Observability';
+import { FilterBar } from '../../../shared/components/FilterBar';
+import { SessionCard } from '../../../shared/components/SessionCard';
 import { api } from '../../../shared/api/client';
-
-function SessionRow({ session, selected, onSelect }) {
-  const metrics = metricsOf(session);
-  const tokenLabel = Number.isFinite(metrics.total)
-    ? `${compact(metrics.total)} tok`
-    : Number.isFinite(metrics.observedTokens) ? `${compact(metrics.observedTokens)} agent tok` : 'tok —';
-  const billingLabel = Number.isFinite(metrics.credits)
-    ? `${credits(metrics.credits)} credits`
-    : Number.isFinite(metrics.cost) ? money(metrics.cost) : null;
-  return <button className={`session-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(session.id)}>
-    <span className={`status-dot ${statusTone(session.status)}`} />
-    <span className="session-copy">
-      <strong>{session.name || session.id}</strong>
-      <small><span>{session.repositoryName || 'no repo'}</span><span>{session.provider}</span><span className={session.external ? 'external-origin' : ''}>{session.external ? 'external' : 'dashboard'}</span></small>
-    </span>
-    <span className="session-meta"><strong>{duration(metrics.durationMs)}</strong><small>{tokenLabel}{billingLabel ? ` · ${billingLabel}` : ''}</small></span>
-  </button>;
-}
 
 export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync }) {
   const [scope, setScope] = useState('all');
@@ -78,29 +62,49 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   const sync = async () => { setSyncing(true); try { await onSync(); } finally { setSyncing(false); } };
   const availableSources = sources.filter((source) => source.available);
   const availableProviders = [...new Set(availableSources.map((source) => source.provider))];
+  const [moreOpen, setMoreOpen] = useState(false);
+  const filterSelect = (key, label, values) => ({ key, label, value: filters[key], options: values, onChange: (value) => update(key, value) });
+  const primaryFilters = [
+    filterSelect('project', 'Project', options('repositoryName')),
+    filterSelect('provider', 'Provider', options('provider')),
+    filterSelect('model', 'Model', options('model')),
+  ];
+  const moreFilters = [
+    filterSelect('state', 'Status', ['All', 'running', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
+    filterSelect('origin', 'Origin', ['All', 'External', 'Dashboard']),
+    filterSelect('age', 'Activity', ['Any', '24 hours', '7 days', '30 days']),
+    filterSelect('cost', 'Cost', ['Any', '> $1', '< $0.50']),
+    filterSelect('cache', 'Cache hit', ['Any', '< 40%', '> 60%']),
+  ];
+  const allCollapsed = visibleGroups.length > 0 && visibleGroups.every((group) => openGroups[group.id] === false);
+  const toggleAllGroups = () => setOpenGroups((current) => {
+    const next = { ...current };
+    visibleGroups.forEach((group) => { next[group.id] = allCollapsed; });
+    return next;
+  });
 
   return <aside className="sessions-pane">
     <div className="sessions-heading"><h1>Sessions</h1><div className="sessions-heading-actions"><button className="icon-button" onClick={sync} disabled={syncing} aria-label="Sync external sessions" title="Sync external sessions"><ArrowsClockwise className={syncing ? 'spinning' : ''} /></button><button className="secondary-button" onClick={onNewSession}>+ New session</button></div></div>
     <div className="session-tabs" role="tablist">{tabs.map(([id, label, count]) => <button key={id} className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{label} <span>{count}</span></button>)}</div>
     <div className="session-source-strip"><span><i className={availableSources.length ? 'online' : ''} />{externalSessionCount} external</span><small>{availableSources.length ? `${availableProviders.join(' · ')} live` : 'No local sources detected'}</small></div>
     <div className="sessions-controls">
-      <DateRange {...dates} onChange={setDates} />
-      <label className="search-field"><MagnifyingGlass /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search sessions, repos or prompts…" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X /></button>}</label>
-      <div className="filter-grid">{[
-        ['project', 'Project', options('repositoryName')],
-        ['provider', 'Provider', options('provider')],
-        ['model', 'Model', options('model')],
-        ['state', 'Status', ['All', 'running', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']],
-        ['origin', 'Origin', ['All', 'External', 'Dashboard']],
-        ['age', 'Activity', ['Any', '24 hours', '7 days', '30 days']],
-        ['cost', 'Cost', ['Any', '> $1', '< $0.50']],
-        ['cache', 'Cache hit', ['Any', '< 40%', '> 60%']],
-      ].map(([key, label, values]) => <label key={key}>{label}<select value={filters[key]} onChange={(event) => update(key, event.target.value)}>{values.map((value) => <option key={value}>{value}</option>)}</select></label>)}</div>
-      <div className="group-mode"><span>Group by</span><button className={groupMode === 'project' ? 'active' : ''} onClick={() => setGroupMode('project')}>Project</button><button className={groupMode === 'state' ? 'active' : ''} onClick={() => setGroupMode('state')}>Status</button></div>
+      <FilterBar
+        query={query} onQuery={setQuery} searchPlaceholder="Search sessions, repos or prompts…"
+        dates={dates} onDates={setDates}
+        primary={primaryFilters} more={moreFilters} moreOpen={moreOpen} onToggleMore={() => setMoreOpen((value) => !value)}
+      />
+      <div className="group-mode">
+        <span>Group by</span>
+        <div className="group-mode-toggle">
+          <button className={groupMode === 'project' ? 'active' : ''} onClick={() => setGroupMode('project')}>Project</button>
+          <button className={groupMode === 'state' ? 'active' : ''} onClick={() => setGroupMode('state')}>Status</button>
+        </div>
+        <button type="button" className="icon-button" onClick={toggleAllGroups} disabled={!visibleGroups.length} aria-label={allCollapsed ? 'Expand all groups' : 'Collapse all groups'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <CaretRight /> : <CaretDown />}</button>
+      </div>
     </div>
     <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync Codex, Claude or Copilot, or start a session here.</span></div>}{visibleGroups.map((group) => <section key={group.id} className="session-group">
       <button className="group-heading" onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}><span>{group.label} ({group.sessions.length})</span>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}</button>
-      {openGroups[group.id] !== false && group.sessions.map((session) => <SessionRow key={session.id} session={session} selected={selected === session.id} onSelect={onSelect} />)}
+      {openGroups[group.id] !== false && group.sessions.map((session) => <SessionCard key={session.id} session={session} selected={selected === session.id} onSelect={onSelect} />)}
     </section>)}</div>
   </aside>;
 }
@@ -162,13 +166,18 @@ function TraceChart({ mode, detail }) {
   return <section className="trace-chart-panel" aria-label={`${label} over time`}>
     <div className="chart-topbar"><div className="chart-legend">{mode === 'tokens' ? <><span><i style={{ background: '#70c5ac' }} />Context</span><span><i style={{ background: '#79bfee' }} />Input</span><span><i style={{ background: '#b680ff' }} />Output</span></> : <span><i style={{ background: seriesColor }} />{seriesName}</span>}<small>{isZeroFallback ? 'No provider usage reported · showing zero' : `${visiblePoints.length} measurements`}</small></div><ChartInspector point={inspectedPoint} mode={mode} /></div>
     <div className="chart-wrap">
-    <ResponsiveContainer width="100%" height="100%"><LineChart data={chartPoints} margin={{ top: 12, right: 18, left: 4, bottom: 6 }} onMouseMove={(state) => setActivePoint(state?.activePayload?.[0]?.payload || null)} onMouseLeave={() => setActivePoint(null)}>
+    <ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartPoints} margin={{ top: 12, right: 18, left: 4, bottom: 6 }} onMouseMove={(state) => setActivePoint(state?.activePayload?.[0]?.payload || null)} onMouseLeave={() => setActivePoint(null)}>
+      <defs><linearGradient id="trace-chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={mode === 'tokens' ? '#79bfee' : seriesColor} stopOpacity={.45} /><stop offset="100%" stopColor={mode === 'tokens' ? '#79bfee' : seriesColor} stopOpacity={0} /></linearGradient></defs>
       <CartesianGrid stroke="#233747" vertical strokeDasharray="0" />
       <XAxis type="number" scale="time" domain={xDomain} dataKey="at" stroke="#7590a5" tickLine={false} axisLine={{ stroke: '#314657' }} tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }} tickCount={6} minTickGap={32} tickFormatter={(value) => new Date(value).toLocaleString([], spansDays ? { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' })} />
       <YAxis yAxisId="left" width={54} domain={paddedChartDomain(chartPoints.flatMap((point) => mode === 'tokens' ? [point.contextTokens, point.input, point.output] : [point[mode]]).map((value) => Number.isFinite(value) ? value : 0))} stroke="#7590a5" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} tickFormatter={mode === 'cost' ? money : mode === 'credits' ? credits : compact} />
       <Tooltip content={<CompactChartTooltip mode={mode} />} cursor={{ stroke: '#557589', strokeDasharray: '3 3' }} offset={10} isAnimationActive={false} wrapperStyle={{ pointerEvents: 'none', zIndex: 4 }} />
-      {mode === 'tokens' ? <><Line yAxisId="left" name="Context" type="stepAfter" dataKey="contextTokens" stroke="#70c5ac" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls /><Line yAxisId="left" name="Input" type="stepAfter" dataKey="input" stroke="#79bfee" strokeWidth={2} dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls /><Line yAxisId="left" name="Output" type="stepAfter" dataKey="output" stroke="#b680ff" strokeWidth={2} dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls /></> : <Line yAxisId="left" name={seriesName} type="stepAfter" dataKey={mode} stroke={seriesColor} strokeWidth={2} dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls />}
-    </LineChart></ResponsiveContainer>
+      {mode === 'tokens'
+        ? <><Area yAxisId="left" name="Input" type="stepAfter" dataKey="input" stroke="#79bfee" strokeWidth={2} fill="url(#trace-chart-fill)" dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls />
+            <Line yAxisId="left" name="Context" type="stepAfter" dataKey="contextTokens" stroke="#70c5ac" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+            <Line yAxisId="left" name="Output" type="stepAfter" dataKey="output" stroke="#b680ff" strokeWidth={2} dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls /></>
+        : <Area yAxisId="left" name={seriesName} type="stepAfter" dataKey={mode} stroke={seriesColor} strokeWidth={2} fill="url(#trace-chart-fill)" dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls />}
+    </ComposedChart></ResponsiveContainer>
     </div>
   </section>;
 }
@@ -257,7 +266,7 @@ export function MainTrace({ detail, hasRuns, paused, onPause, onCompare, onRawEv
       </div>
     </header>
     <section className="trace-summary">
-      <div className="trace-summary-copy"><h2>{paused ? 'Visual stream paused' : eventText(lastEvent) || run.prompt} <span>· {duration(metrics.durationMs)}</span></h2><p>{run.prompt}</p></div>
+      <div className="trace-summary-copy"><h2>{paused ? 'Visual stream paused' : eventText(lastEvent) || run.prompt} <span>· {duration(metrics.durationMs)}</span></h2></div>
       <div className="metric-switch"><button className={metric === 'tokens' ? 'active' : ''} onClick={() => setMetric('tokens')}>Tokens</button><button className={metric === 'cost' ? 'active' : ''} onClick={() => setMetric('cost')}>Cost</button>{Number.isFinite(metrics.credits) && <button className={metric === 'credits' ? 'active' : ''} onClick={() => setMetric('credits')}>Credits</button>}</div>
       <div className="inline-metrics">{Number.isFinite(metrics.total) ? <><span><i className="dot blue" />Cumulative input<strong>{compact(metrics.input)}</strong></span><span><i className="dot purple" />Cumulative output<strong>{compact(metrics.output)}</strong></span></> : <><span><i className="dot blue" />Context in use<strong>{compact(metrics.contextTokens)}</strong></span><span><i className="dot purple" />Session total<strong>Not reported</strong></span></>}<span><i className="dot green" />{Number.isFinite(metrics.credits) ? metrics.creditUnit || 'Provider credits' : 'Cumulative cost'}<strong>{Number.isFinite(metrics.credits) ? credits(metrics.credits) : money(metrics.cost)}</strong></span></div>
     </section>
