@@ -34,33 +34,79 @@ export function activityFor(events) {
   return { commands: [...commands].map(([name, count]) => ({ name, count })).sort((a,b) => b.count-a.count), files: [...files.values()], warnings };
 }
 
+// Command families are a presentation-neutral grouping of the observed command
+// name; anything we do not recognise stays 'other' instead of being guessed.
+const COMMAND_CATEGORIES = [
+  ['navigation', /^(?:cd|pushd|popd)\b/],
+  ['git', /^git\b/],
+  ['search', /^(?:grep|rg|ag|ack|find|fd|locate|which|jq)\b/],
+  ['edit', /^(?:sed|awk|patch|apply_patch|vi|vim|nano|tee|ed)\b/],
+  ['file system', /^(?:ls|cat|cp|mv|rm|mkdir|rmdir|touch|head|tail|wc|stat|chmod|chown|tree|du|df|less|more|open|diff|file|ln|tar|zip|unzip)\b/],
+  ['process', /^(?:python3?|node|npm|pnpm|yarn|bun|deno|docker|make|bash|sh|zsh|kill|ps|go|cargo|java|ruby|php|pytest|jest|swift|xcodebuild|curl|wget|sleep)\b/],
+  ['environment', /^(?:export|env|printenv|set|source|echo|history|alias|Variable assignment)\b/],
+];
+
+export const commandCategory = (name) => COMMAND_CATEGORIES.find(([, pattern]) => pattern.test(name))?.[0] || 'other';
+
 export function buildObservability(runs, store) {
-  const commandCounts = new Map(), nodes = new Map(), links = new Map();
+  const commands = new Map(), nodes = new Map(), links = new Map();
+  const perRun = [];
   let warningCount = 0, fileReads = 0, fileWrites = 0, errors = 0;
-  const connect = (a, b) => {
-    nodes.set(a.id, a); nodes.set(b.id, b);
+  const add = (bucket, key, amount) => { bucket[key] = (bucket[key] || 0) + amount; };
+  const node = (item, weight) => {
+    const existing = nodes.get(item.id) || { ...item, weight: 0 };
+    existing.weight += weight;
+    nodes.set(item.id, existing);
+    return existing;
+  };
+  const connect = (a, b, count = 1) => {
     const key = a.id + '|' + b.id;
     const link = links.get(key) || { source: a.id, target: b.id, count: 0 };
-    link.count++; links.set(key, link);
+    link.count += count; links.set(key, link);
   };
   for (const run of runs) {
     const events = store.eventsFor(run.id);
     const activity = activityFor(events);
     warningCount += activity.warnings.length;
     errors += events.filter(e => e.type === 'agent.error').length;
-    const project = { id: 'project:' + run.repositoryPath, name: run.repositoryName || 'No project', kind: 'project' };
-    const model = { id: 'model:' + run.provider + ':' + run.model, name: run.model || run.provider, kind: 'model' };
+    const project = node({ id: 'project:' + run.repositoryPath, name: run.repositoryName || 'No project', kind: 'project' }, 1);
+    const model = node({ id: 'model:' + run.provider + ':' + run.model, name: run.model || run.provider, kind: 'model', provider: run.provider }, 1);
     connect(project, model);
     for (const command of activity.commands) {
-      commandCounts.set(command.name, (commandCounts.get(command.name) || 0) + command.count);
-      connect(model, { id: 'command:' + command.name, name: command.name, kind: 'command' });
+      const entry = commands.get(command.name)
+        || { name: command.name, count: 0, category: commandCategory(command.name), byProvider: {}, byModel: {}, byProject: {}, byPair: {} };
+      entry.count += command.count;
+      add(entry.byProvider, run.provider, command.count);
+      add(entry.byModel, run.model || run.provider, command.count);
+      add(entry.byProject, project.name, command.count);
+      add(entry.byPair, `${project.name}\u0001${model.name}`, command.count);
+      commands.set(command.name, entry);
+      connect(model, node({ id: 'command:' + command.name, name: command.name, kind: 'command' }, command.count), command.count);
     }
     for (const file of activity.files) {
       fileReads += file.reads; fileWrites += file.writes;
-      connect(model, { id: 'file:' + run.repositoryPath + ':' + file.path, name: file.path, kind: 'file' });
+      const fileNode = node({ id: 'file:' + run.repositoryPath + ':' + file.path, name: file.path, kind: 'file', reads: 0, writes: 0 }, file.reads + file.writes);
+      fileNode.reads += file.reads; fileNode.writes += file.writes;
+      connect(model, fileNode);
+    }
+    perRun.push({
+      commands: activity.commands.map((command) => 'command:' + command.name),
+      files: activity.files.map((file) => 'file:' + run.repositoryPath + ':' + file.path),
+    });
+  }
+  // Commands and files are only related through the session that touched both, so
+  // the co-occurrence is limited to the nodes the graph actually draws.
+  const top = (kind, limit) => new Set([...nodes.values()].filter((item) => item.kind === kind)
+    .sort((a, b) => b.weight - a.weight).slice(0, limit).map((item) => item.id));
+  const topCommands = top('command', 10), topFiles = top('file', 14);
+  for (const run of perRun) {
+    for (const command of new Set(run.commands.filter((id) => topCommands.has(id)))) {
+      for (const file of new Set(run.files.filter((id) => topFiles.has(id)))) connect(nodes.get(command), nodes.get(file));
     }
   }
+  const commandList = [...commands.values()].sort((a, b) => b.count - a.count);
   return { warningCount, fileReads, fileWrites, errors,
-    commands: [...commandCounts].map(([name,count]) => ({ name,count })).sort((a,b) => b.count-a.count),
+    commands: commandList,
+    commandCalls: commandList.reduce((total, command) => total + command.count, 0),
     graph: { nodes: [...nodes.values()], links: [...links.values()] } };
 }
