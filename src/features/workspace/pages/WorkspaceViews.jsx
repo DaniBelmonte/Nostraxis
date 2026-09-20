@@ -1,55 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Check, FolderOpen, Play } from '@phosphor-icons/react';
-import {
-  Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts';
 import { api } from '../../../shared/api/client';
-import { compact, credits, duration, money, percent, statusLabel } from '../../../shared/lib/metrics';
-import { ChartTooltip, DateRange, CommandChart, ConnectionGraph } from '../../../shared/components/Observability';
+import { statusLabel } from '../../../shared/lib/metrics';
 
 export function PageShell({ eyebrow, title, description, children }) {
-  return <main className="workspace-page"><header className="page-header"><div><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div></header><div className="page-scroll">{children}</div></main>;
-}
-
-function MetricCard({ label, value, meta, tone = '' }) {
-  return <article className={`metric-card ${tone}`}><span>{label}</span><strong>{value}</strong><small>{meta}</small></article>;
-}
-
-export function AnalyticsView({ initial, repositories, onInspect }) {
-  const [analytics, setAnalytics] = useState(initial);
-  const [filters, setFilters] = useState({ repository: '', provider: '', model: '', from: '', to: '' });
-  useEffect(() => {
-    let active = true;
-    api.analytics({
-      ...filters,
-      from: filters.from ? new Date(`${filters.from}T00:00:00`).toISOString() : '',
-      to: filters.to ? new Date(`${filters.to}T23:59:59`).toISOString() : '',
-    }).then(value => { if (active) setAnalytics(value); }).catch(() => {});
-    return () => { active = false; };
-  }, [filters, initial]);
-  const summary = analytics?.summary || {};
-  const chart = (analytics?.dimensions?.model || []).map((row) => ({ ...row, cost: row.totalCostUsd, tokens: row.totalTokens, observedTokens: row.totalObservedTokens }));
-  const options = (key) => ['', ...new Set((initial?.timeseries || []).map((row) => row[key]).filter(Boolean))];
-  return <PageShell eyebrow="Aggregated observability" title="Analytics" description="Cost, tokens, cache, latency and quality without filling gaps the provider does not expose.">
-    <DateRange from={filters.from} to={filters.to} onChange={dates=>setFilters({...filters,...dates})} />
-    <div className="analytics-filters">
-      <label>Project<select value={filters.repository} onChange={(event) => setFilters({ ...filters, repository: event.target.value })}><option value="">All</option>{[...new Set([...repositories.map(repo => repo.name), ...options('repository').filter(Boolean)])].sort().map(name => <option key={name} value={name}>{name}</option>)}</select></label>
-      {['provider', 'model'].map((key) => <label key={key}>{key}<select value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>{options(key).map((value) => <option key={value || 'all'} value={value}>{value || 'All'}</option>)}</select></label>)}
-    </div>
-    <div className="metric-grid">
-      <MetricCard label="Runs" value={analytics?.runCount ?? '—'} meta="current filter" />
-      <MetricCard label="Session tokens" value={compact(summary.totalTokens)} meta={`${compact(summary.totalObservedTokens)} attributed to agents`} tone="blue" />
-      <MetricCard label="Cost" value={money(summary.totalCostUsd)} meta="provider or configured pricing" tone="green" />
-      <MetricCard label="Provider credits" value={credits(summary.totalProviderCredits)} meta={summary.providerCreditUnit || 'incompatible units or not reported'} />
-      <MetricCard label="Cache hit" value={percent(summary.cacheHit)} meta="input cacheado / input" tone="purple" />
-      <MetricCard label="Average evaluation" value={Number.isFinite(summary.averageEvaluationScore) ? summary.averageEvaluationScore.toFixed(2) : 'Not reported'} meta="available evaluators" />
-    </div>
-    <div className="metric-grid"><MetricCard label="Reads" value={compact(analytics?.observability?.fileReads)} meta="observed" /><MetricCard label="Writes" value={compact(analytics?.observability?.fileWrites)} meta="observed" /><MetricCard label="Warnings" value={compact(analytics?.observability?.warningCount)} meta="sensitive paths and commands" /><MetricCard label="Errors" value={compact(analytics?.observability?.errors)} meta="reported" /><MetricCard label="Average duration" value={duration(summary.averageDurationMs)} meta="active execution time" /></div>
-    <section className="panel-block"><header><div><span>Comparison</span><h2>Models by tokens and cost</h2></div><small>Independent axes · tokens / USD</small></header><div className="analytics-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={chart} margin={{left:10,right:10,bottom:35}}><CartesianGrid stroke="#233747" vertical={false} /><XAxis dataKey="key" stroke="#7590a5" tick={{fontSize:10}} angle={-15} textAnchor="end" /><YAxis yAxisId="tokens" stroke="#7590a5" tickFormatter={compact} /><YAxis yAxisId="cost" orientation="right" stroke="#7590a5" tickFormatter={money} /><Tooltip content={<ChartTooltip />} /><Legend /><Bar name="Session tokens" yAxisId="tokens" dataKey="tokens" fill="#79bfee" /><Bar name="Agents (included)" yAxisId="tokens" dataKey="observedTokens" fill="#b680ff" /><Bar name="Cost" yAxisId="cost" dataKey="cost" fill="#70c5ac" /></BarChart></ResponsiveContainer></div></section>
-    <section className="panel-block"><header><div><span>Drill-down</span><h2>Included runs</h2></div></header><div className="data-table analytics-table"><div className="table-head"><span>Run</span><span>Repo</span><span>Provider / model</span><span>Tokens</span><span>Cost</span><span>Duration</span><span>Eval</span></div>{(analytics?.timeseries || []).map((row) => <button key={row.runId} onClick={() => onInspect(row.runId)}><strong>{row.runId}</strong><span>{row.repository}</span><code>{row.provider} / {row.model || 'auto'}</code><code>{Number.isFinite(row.totalTokens) ? compact(row.totalTokens) : Number.isFinite(row.observedTokens) ? `${compact(row.observedTokens)} agents` : '—'}</code><code>{money(row.costUsd)}</code><code>{duration(row.durationMs)}</code><code>{Number.isFinite(row.evaluationScore) ? row.evaluationScore.toFixed(2) : '—'}</code></button>)}</div></section>
-    <CommandChart commands={analytics?.observability?.commands} />
-    <ConnectionGraph graph={analytics?.observability?.graph} />
-  </PageShell>;
+  return <main className="workspace-page"><header className="page-header"><div>{eyebrow && <span>{eyebrow}</span>}<h1>{title}</h1><p>{description}</p></div></header><div className="page-scroll">{children}</div></main>;
 }
 
 export function LabView({ data, reload, setError }) {
