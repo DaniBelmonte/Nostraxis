@@ -23,8 +23,11 @@
 .date-range > span { color:#8da5b7; }
 .date-range button, .date-range input, .graph-scroll + input, .panel-block header > input { border:1px solid #344956; color:#cfdae3; background:#11212d; padding:7px 9px; border-radius:4px; }
 .date-range label { display:flex; gap:5px; align-items:center; color:#91a7b8; }
-.sessions-pane .date-range input { width:120px; font-size:10px; }
-.sessions-pane .date-range label { font-size:10px; }
+.sessions-pane .date-range { column-gap:5px; }
+.sessions-pane .date-range > span { flex:1 1 100%; }
+.sessions-pane .date-range button { flex:1 1 auto; padding:6px 4px; font-size:10px; }
+.sessions-pane .date-range label { flex:1 1 calc(50% - 3px); min-width:0; font-size:10px; }
+.sessions-pane .date-range input { flex:1 1 auto; width:100%; min-width:0; font-size:10px; padding:6px 5px; }
 .detail-body { min-height:0; display:flex; flex-direction:column; overflow:auto; }
 .detail-tabs { display:flex; gap:18px; padding:0 14px; border-bottom:1px solid #2a3e4c; flex-shrink:0; }
 .detail-tabs button { background:none; border:0; border-bottom:2px solid transparent; padding:12px 0; color:#9db1c2; cursor:pointer; font-size:12px; }
@@ -188,7 +191,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .search-field button { border: 0; background: transparent; padding: 0; cursor: pointer; display: grid; place-items: center; }
 .filter-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .filter-toolbar .filter-search-field { flex: 1 1 160px; min-width: 0; }
-.filter-toolbar .date-range { margin: 0; flex: none; }
+.filter-toolbar .date-range { margin: 0; flex: 1 1 100%; min-width: 0; }
 .filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 7px 8px; margin-top: 9px; }
 .filter-row label { min-width: 92px; flex: 1 1 92px; color: #8fa7ba; font-size: 9px; display: grid; gap: 4px; }
 .filter-row select { width: 100%; height: 29px; border: 1px solid #395063; background: #102431; color: #d5e1e9; border-radius: 2px; font-size: 10px; padding: 0 6px; min-width: 0; }
