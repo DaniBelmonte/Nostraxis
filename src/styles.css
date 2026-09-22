@@ -23,8 +23,11 @@
 .date-range > span { color:#8da5b7; }
 .date-range button, .date-range input, .graph-scroll + input, .panel-block header > input { border:1px solid #344956; color:#cfdae3; background:#11212d; padding:7px 9px; border-radius:4px; }
 .date-range label { display:flex; gap:5px; align-items:center; color:#91a7b8; }
-.sessions-pane .date-range input { width:120px; font-size:10px; }
-.sessions-pane .date-range label { font-size:10px; }
+.sessions-pane .date-range { column-gap:5px; }
+.sessions-pane .date-range > span { flex:1 1 100%; }
+.sessions-pane .date-range button { flex:1 1 auto; padding:6px 4px; font-size:10px; }
+.sessions-pane .date-range label { flex:1 1 calc(50% - 3px); min-width:0; font-size:10px; }
+.sessions-pane .date-range input { flex:1 1 auto; width:100%; min-width:0; font-size:10px; padding:6px 5px; }
 .detail-body { min-height:0; display:flex; flex-direction:column; overflow:auto; }
 .detail-tabs { display:flex; gap:18px; padding:0 14px; border-bottom:1px solid #2a3e4c; flex-shrink:0; }
 .detail-tabs button { background:none; border:0; border-bottom:2px solid transparent; padding:12px 0; color:#9db1c2; cursor:pointer; font-size:12px; }
@@ -188,7 +191,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .search-field button { border: 0; background: transparent; padding: 0; cursor: pointer; display: grid; place-items: center; }
 .filter-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .filter-toolbar .filter-search-field { flex: 1 1 160px; min-width: 0; }
-.filter-toolbar .date-range { margin: 0; flex: none; }
+.filter-toolbar .date-range { margin: 0; flex: 1 1 100%; min-width: 0; }
 .filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 7px 8px; margin-top: 9px; }
 .filter-row label { min-width: 92px; flex: 1 1 92px; color: #8fa7ba; font-size: 9px; display: grid; gap: 4px; }
 .filter-row select { width: 100%; height: 29px; border: 1px solid #395063; background: #102431; color: #d5e1e9; border-radius: 2px; font-size: 10px; padding: 0 6px; min-width: 0; }
@@ -539,15 +542,16 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .comparison-tray-head strong { font-size: 12px; }
 .comparison-tray-head small { color: #7e96a8; font-size: 10px; }
 .comparison-tray-slots { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.comparison-chip { min-width: 0; width: 100%; height: 42px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid #344956; background: #102331; }
-.comparison-chip .agent-icon { width: 22px; height: 22px; border-radius: 5px; }
+.comparison-chip { min-width: 0; width: 100%; min-height: 42px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-content: center; align-items: center; column-gap: 7px; row-gap: 2px; padding: 5px 9px; border: 1px solid #344956; background: #102331; }
+.comparison-chip .agent-icon { grid-column: 1; grid-row: 1 / span 2; width: 22px; height: 22px; border-radius: 5px; }
 .comparison-chip .agent-icon svg { width: 11px; height: 11px; }
-.comparison-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dce8ef; font-size: 10px; }
-.comparison-chip small { grid-column: 2; color: #7e96a8; font-size: 8px; margin-top: 12px; }
-.comparison-chip button { border: 0; background: transparent; color: #8098aa; padding: 0; display: grid; place-items: center; cursor: pointer; }
+.comparison-chip-name { grid-column: 2; grid-row: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dce8ef; font-size: 10px; }
+.comparison-chip small { grid-column: 2; grid-row: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7e96a8; font-size: 8px; }
+.comparison-chip button { grid-column: 3; grid-row: 1 / span 2; border: 0; background: transparent; color: #8098aa; padding: 0; display: grid; place-items: center; cursor: pointer; }
 .comparison-chip button svg { width: 12px; height: 12px; }
-.comparison-chip.empty { border-style: dashed; color: #67818f; grid-template-columns: 16px minmax(0, 1fr); }
-.comparison-chip.empty svg { width: 13px; height: 13px; }
+.comparison-chip.empty { border-style: dashed; color: #67818f; grid-template-columns: 16px minmax(0, 1fr); grid-template-rows: auto; }
+.comparison-chip.empty svg { grid-column: 1; grid-row: 1; width: 13px; height: 13px; }
+.comparison-chip.empty small { grid-column: 2; grid-row: 1; }
 .comparison-tray .primary-button { flex: none; height: 38px; display: flex; align-items: center; gap: 8px; justify-self: auto; }
 .comparison-tray .primary-button svg { width: 14px; height: 14px; }
 
