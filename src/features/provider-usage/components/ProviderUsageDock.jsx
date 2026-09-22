@@ -3,7 +3,7 @@ import { X } from '@phosphor-icons/react';
 import { api } from '../../../shared/api/client';
 import { AgentIcon, PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 
-const providerOrder = ['codex', 'claude', 'copilot'];
+const providerOrder = ['codex', 'claude', 'copilot', 'hermes'];
 const fallbackNames = PROVIDER_NAMES;
 const statusLabels = {
   connected: 'Connected',

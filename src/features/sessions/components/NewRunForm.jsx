@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api } from '../../../shared/api/client';
 
 export function NewRunForm({ data, onCreated, onError }) {
-  const available = data.providers.find((provider) => provider.available)?.id || 'custom';
+  const managedProviders = data.providers.filter((provider) => provider.capabilities?.managedRuns !== false);
+  const available = managedProviders.find((provider) => provider.available)?.id || 'custom';
   const [form, setForm] = useState({
     repositoryId: data.repositories[0]?.id || '', provider: available, model: '',
     name: 'Developer task', prompt: 'Inspect the repository and identify the smallest safe optimization.',
@@ -16,7 +17,7 @@ export function NewRunForm({ data, onCreated, onError }) {
   };
   return <form className="modal-form" onSubmit={submit}>
     <label>Repository<select value={form.repositoryId} onChange={(event) => update('repositoryId', event.target.value)}>{data.repositories.map((repo) => <option key={repo.id} value={repo.id}>{repo.name}</option>)}</select></label>
-    <label>Provider<select value={form.provider} onChange={(event) => update('provider', event.target.value)}>{data.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}{provider.available ? '' : ' · not detected'}</option>)}</select></label>
+    <label>Provider<select value={form.provider} onChange={(event) => update('provider', event.target.value)}>{managedProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}{provider.available ? '' : ' · not detected'}</option>)}</select></label>
     <label>Model<input value={form.model} onChange={(event) => update('model', event.target.value)} placeholder="empty = provider default" /></label>
     {form.provider === 'custom' && <label>JSONL executable<input value={form.executable} onChange={(event) => update('executable', event.target.value)} placeholder="/absolute/path/to/runner" /></label>}
     <label>Name<input value={form.name} onChange={(event) => update('name', event.target.value)} /></label>
