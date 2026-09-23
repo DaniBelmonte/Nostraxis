@@ -17,10 +17,16 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   const [scope, setScope] = useState('all');
   const [groupMode, setGroupMode] = useState('project');
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState({ project: 'All', provider: 'All', model: 'All', state: 'All', origin: 'All', age: 'Any', cost: 'Any', cache: 'Any' });
+  const [filters, setFilters] = useState({ project: 'All', provider: 'All', model: 'All', workload: 'All', state: 'All', origin: 'All', age: 'Any', cost: 'Any', cache: 'Any' });
   const [openGroups, setOpenGroups] = useState({ live: true, attention: true, completed: true });
   const [syncing, setSyncing] = useState(false);
   const [dates, setDates] = useState({ from: '', to: '' });
+  const isHermesSelected = filters.provider === 'hermes';
+  useEffect(() => {
+    if (isHermesSelected) return;
+    setFilters((current) => current.workload === 'All' ? current : { ...current, workload: 'All' });
+    setGroupMode((current) => current === 'workload' ? 'project' : current);
+  }, [isHermesSelected]);
   const category = (run) => run.status === 'running' || run.status === 'queued' ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
   const counts = useMemo(() => ({
     live: runs.filter((run) => category(run) === 'live').length,
@@ -37,6 +43,11 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
           sessions: scoped.filter((run) => (run.repositoryName || 'No project') === project),
         }));
     }
+    if (groupMode === 'workload') {
+      const labels = { interactive: 'Interactive', automation: 'Automations', messaging: 'Messaging', unspecified: 'Unclassified' };
+      return [...new Set(scoped.map((run) => run.workload || 'unspecified'))]
+        .map((workload) => ({ id: `workload:${workload}`, label: labels[workload] || workload, sessions: scoped.filter((run) => (run.workload || 'unspecified') === workload) }));
+    }
     return [['live', 'Live'], ['attention', 'Needs attention'], ['completed', 'Completed']]
       .map(([id, label]) => ({ id, label, sessions: scoped.filter((run) => category(run) === id) }));
   }, [runs, scope, groupMode]);
@@ -44,7 +55,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   const tabs = [['all', 'All', runs.length], ['live', 'Live', counts.live], ['attention', 'Attention', counts.attention], ['completed', 'Completed', counts.completed]];
   const visibleGroups = useMemo(() => groups.map((group) => ({ ...group, sessions: group.sessions.filter((run) => {
       const metric = metricsOf(run);
-      const search = `${run.name} ${run.id} ${run.repositoryName} ${run.provider} ${run.model} ${run.prompt}`.toLowerCase();
+      const search = `${run.name} ${run.id} ${run.repositoryName} ${run.provider} ${run.model} ${run.workload} ${run.sourceKind} ${run.prompt}`.toLowerCase();
       const ageMs = Date.now() - Date.parse(run.updatedAt || run.startedAt);
       return search.includes(query.toLowerCase())
         && (!dates.from || Date.parse(run.startedAt) >= new Date(dates.from+'T00:00:00').getTime())
@@ -52,6 +63,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
         && (filters.project === 'All' || run.repositoryName === filters.project)
         && (filters.provider === 'All' || run.provider === filters.provider)
         && (filters.model === 'All' || run.model === filters.model)
+        && (filters.workload === 'All' || run.workload === filters.workload)
         && (filters.state === 'All' || run.status === filters.state)
         && (filters.origin === 'All' || (filters.origin === 'External' ? run.external : !run.external))
         && (filters.age === 'Any' || ageMs <= (filters.age === '24 hours' ? 86_400_000 : filters.age === '7 days' ? 604_800_000 : 2_592_000_000))
@@ -70,9 +82,10 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
     filterSelect('model', 'Model', options('model')),
   ];
   const moreFilters = [
+    ...(isHermesSelected ? [filterSelect('workload', 'Hermes type', options('workload'))] : []),
     filterSelect('state', 'Status', ['All', 'running', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
     filterSelect('origin', 'Origin', ['All', 'External', 'Dashboard']),
-    filterSelect('age', 'Activity', ['Any', '24 hours', '7 days', '30 days']),
+    filterSelect('age', 'Updated', ['Any', '24 hours', '7 days', '30 days']),
     filterSelect('cost', 'Cost', ['Any', '> $1', '< $0.50']),
     filterSelect('cache', 'Cache hit', ['Any', '< 40%', '> 60%']),
   ];
@@ -97,12 +110,13 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
         <span>Group by</span>
         <div className="group-mode-toggle">
           <button className={groupMode === 'project' ? 'active' : ''} onClick={() => setGroupMode('project')}>Project</button>
+          {isHermesSelected && <button className={groupMode === 'workload' ? 'active' : ''} onClick={() => setGroupMode('workload')}>Hermes type</button>}
           <button className={groupMode === 'state' ? 'active' : ''} onClick={() => setGroupMode('state')}>Status</button>
         </div>
         <button type="button" className="icon-button" onClick={toggleAllGroups} disabled={!visibleGroups.length} aria-label={allCollapsed ? 'Expand all groups' : 'Collapse all groups'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <CaretRight /> : <CaretDown />}</button>
       </div>
     </div>
-    <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync Codex, Claude or Copilot, or start a session here.</span></div>}{visibleGroups.map((group) => <section key={group.id} className="session-group">
+    <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync Codex, Claude, Copilot or Hermes, or start a session here.</span></div>}{visibleGroups.map((group) => <section key={group.id} className="session-group">
       <button className="group-heading" onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}><span>{group.label} ({group.sessions.length})</span>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}</button>
       {openGroups[group.id] !== false && group.sessions.map((session) => <SessionCard key={session.id} session={session} selected={selected === session.id} onSelect={onSelect} />)}
     </section>)}</div>
@@ -248,7 +262,7 @@ export function MainTrace({ detail, hasRuns, paused, onPause, onCompare, onRawEv
   useEffect(() => {
     if (metric === 'credits' && !Number.isFinite(detail?.run?.usage?.credits)) setMetric('tokens');
   }, [detail?.run?.id, detail?.run?.usage?.credits, metric]);
-  if (!detail) return <main className="trace-pane loading-panel"><Database weight="duotone" /><h2>{hasRuns ? 'Loading timeline…' : 'Connect your agent sources'}</h2><p>{hasRuns ? 'Retrieving normalised events.' : 'The dashboard detects real Codex, Claude and Copilot sessions, as well as sessions started here.'}</p>{!hasRuns && <button className="primary-button" onClick={onEmptyAction}>Add repository</button>}</main>;
+  if (!detail) return <main className="trace-pane loading-panel"><Database weight="duotone" /><h2>{hasRuns ? 'Loading timeline…' : 'Connect your agent sources'}</h2><p>{hasRuns ? 'Retrieving normalised events.' : 'The dashboard detects real Codex, Claude, Copilot and Hermes sessions, as well as sessions started here.'}</p>{!hasRuns && <button className="primary-button" onClick={onEmptyAction}>Add repository</button>}</main>;
   const { run, events } = detail;
   const metrics = metricsOf(run);
   // The active time sums the turns; the span and the last turn are reported

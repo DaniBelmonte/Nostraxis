@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { collectCopilotOtel } from './copilot-otel.mjs';
 import { applyVscodeChatRecord, buildVscodeCopilotSnapshot, defaultVscodeChatRoots } from './vscode-copilot-chat.mjs';
+import { readHermesSessions } from './hermes-sessions.mjs';
 import { toIsoTimestamp } from '../core/timing.mjs';
 
 const MAX_RESPONSE = 250_000;
@@ -378,6 +379,7 @@ export function defaultSessionSources({ copilotTelemetryRoot } = {}) {
     { provider: 'codex', root: path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions') },
     { provider: 'claude', root: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects') },
     { provider: 'copilot', root: path.join(process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot'), 'session-state'), label: 'GitHub Copilot CLI / Agent' },
+    { provider: 'hermes', root: process.env.NOSTRAXIS_HERMES_STATE_DB || path.join(os.homedir(), '.hermes', 'state.db'), format: 'hermes-sqlite', label: 'Hermes Agent' },
     ...defaultVscodeChatRoots().map((root) => ({ provider: 'copilot', root, format: 'vscode-chat', label: 'VS Code Copilot Chat' })),
   ];
   for (const root of [copilotTelemetryRoot, telemetryRoot].filter(Boolean)) {
@@ -394,6 +396,7 @@ export function createSessionObserver({
   maxAgeMs = Number(process.env.NOSTRAXIS_SESSION_MAX_AGE_DAYS || 14) * 86_400_000,
 } = {}) {
   const tracked = new Map();
+  const sourceSignatures = new Map();
   const status = roots.map((item) => ({ ...item, available: false, count: 0, error: null, lastSyncAt: null }));
   let closed = false;
   let pending = null;
@@ -485,6 +488,10 @@ export function createSessionObserver({
           const rootInfo = await stat(source.root);
           source.available = rootInfo.isDirectory() || rootInfo.isFile();
           source.error = null;
+          if (source.format === 'hermes-sqlite') {
+            source.lastSyncAt = new Date(now()).toISOString();
+            continue;
+          }
           const isCopilot = source.provider === 'copilot';
           const discovered = (rootInfo.isFile()
             ? [{ filename: source.root, modified: rootInfo.mtimeMs }]
@@ -512,6 +519,31 @@ export function createSessionObserver({
           source.error = error?.code === 'ENOENT' ? null : error?.code || 'unavailable';
           source.lastSyncAt = new Date(now()).toISOString();
         }
+      }
+    }
+    for (const source of status.filter((item) => item.format === 'hermes-sqlite' && item.available)) {
+      try {
+        const hermesMaxAgeMs = Number(process.env.NOSTRAXIS_HERMES_MAX_AGE_DAYS || 90) * 86_400_000;
+        const hermesMaxSessions = Number(process.env.NOSTRAXIS_HERMES_MAX_SESSIONS || 200);
+        const sessions = readHermesSessions(source.root, { now: now(), maxAgeMs: hermesMaxAgeMs, maxSessions: hermesMaxSessions });
+        source.count = sessions.length;
+        source.lastSyncAt = new Date(now()).toISOString();
+        source.error = null;
+        const sourceId = `${source.provider}:${source.format}:${source.root}`;
+        const signatures = sourceSignatures.get(sourceId) || new Map();
+        for (const item of sessions) {
+          const signature = JSON.stringify([
+            item.snapshot.updatedAt, item.snapshot.status, item.snapshot.usage,
+            item.snapshot.name, item.snapshot.response, item.events.length,
+          ]);
+          if (signatures.get(item.snapshot.id) === signature) continue;
+          await onUpdate?.(item.snapshot, item.events);
+          signatures.set(item.snapshot.id, signature);
+        }
+        sourceSignatures.set(sourceId, signatures);
+      } catch (error) {
+        source.count = 0;
+        source.error = error?.code || String(error?.message || 'unavailable').slice(0, 240);
       }
     }
     for (const target of tracked.values()) {

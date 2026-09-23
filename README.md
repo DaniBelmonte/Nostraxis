@@ -4,7 +4,7 @@
 
 **One local panel to observe, launch and compare work done with coding agents.**
 
-ChatGPT/Codex · Claude Code · GitHub Copilot CLI — without sending your history to any external service.
+ChatGPT/Codex · Claude Code · GitHub Copilot CLI · Hermes Agent — without sending your history to any external service.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-1f6feb.svg?style=flat-square)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.5-5fa04e?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -26,7 +26,7 @@ ChatGPT/Codex · Claude Code · GitHub Copilot CLI — without sending your hist
 
 ---
 
-Nostraxis is a local dashboard to observe, launch and compare work done with coding agents. It brings **ChatGPT/Codex**, **Claude Code** and **GitHub Copilot CLI** sessions into a single view, without sending your history to a Nostraxis service and without replacing each provider's own authentication.
+Nostraxis is a local dashboard to observe, launch and compare work done with general-purpose agents. It brings **ChatGPT/Codex**, **Claude Code**, **GitHub Copilot CLI** and observed **Hermes Agent** sessions into a single view, without sending your history to a Nostraxis service and without replacing each provider's own authentication.
 
 ![Nostraxis session observability dashboard](docs/dashboard-overview.png)
 
@@ -39,7 +39,7 @@ It is designed for two ways of working:
 
 | | |
 | --- | --- |
-| 🔌 **Multi-provider** | Codex, Claude Code and Copilot CLI in one view, with their connection status. |
+| 🔌 **Multi-provider** | Codex, Claude Code, Copilot CLI and Hermes Agent in one view, with their connection status. |
 | 🧭 **Own and external sessions** | Launch sessions from the dashboard or discover the ones already in your local histories. |
 | ⚖️ **Compare** | Contrast up to four real sessions: model, tokens, cost, duration, tools and files. |
 | 📊 **Analytics** | Aggregates by repository, provider, model and date range. |
@@ -49,7 +49,7 @@ It is designed for two ways of working:
 ## 📚 Contents
 
 - [Quick install](#quick-install)
-- [Connecting ChatGPT/Codex, Claude and Copilot](#connecting-chatgptcodex-claude-and-copilot)
+- [Connecting ChatGPT/Codex, Claude, Copilot and Hermes](#connecting-chatgptcodex-claude-copilot-and-hermes)
 - [Working with repositories and New session](#working-with-repositories-and-new-session)
 - [What Sessions means](#what-sessions-means)
 - [Comparing prompts, agents and sessions](#comparing-prompts-agents-and-sessions)
@@ -67,7 +67,7 @@ It is designed for two ways of working:
 ### Requirements
 
 - Node.js **22.5 or later**. Local storage uses `node:sqlite`.
-- One or more agent CLIs installed and authenticated if you want to launch sessions or discover histories: Codex, Claude Code or GitHub Copilot CLI.
+- One or more agent CLIs installed and authenticated if you want to launch sessions or discover histories: Codex, Claude Code, GitHub Copilot CLI or Hermes Agent.
 - Git is recommended so each repository's branch and commit can be recorded; a readable local folder can also be registered.
 
 ### Starting the dashboard
@@ -96,7 +96,7 @@ The dashboard starts with no demo data. For isolated visual development you can 
 NOSTRAXIS_SEED=1 npm run dev
 ```
 
-## Connecting ChatGPT/Codex, Claude and Copilot
+## Connecting ChatGPT/Codex, Claude, Copilot and Hermes
 
 There are no passwords or subscription keys to configure inside the interface. Install and sign in to each provider's CLI through its own official flow, and open the dashboard as the same macOS/Linux/Windows user. On start, Nostraxis detects the available executables and the local histories.
 
@@ -105,6 +105,7 @@ There are no passwords or subscription keys to configure inside the interface. I
 | ChatGPT / Codex | Codex CLI authenticated with your ChatGPT/Codex account | `~/.codex/sessions` | That `codex` is on `PATH` and that you created at least one local session. |
 | Claude | Claude Code authenticated | `~/.claude/projects` | That `claude auth status --json` reports a valid session and that `claude` is on `PATH`. |
 | GitHub Copilot | GitHub Copilot CLI authenticated | Copilot CLI/Agent sessions in `${COPILOT_HOME:-$HOME/.copilot}/session-state`, plus local VS Code Stable and Insiders Copilot Chat sessions in `workspaceStorage` | Check the matching source separately in **Settings**; for the account quota, sign in with `gh auth login` as well. |
+| Hermes Agent | Not available in this POC | Read-only sessions in `~/.hermes/state.db`, including CLI, cron and messaging channels | That `hermes --version` works and that the SQLite state file is readable. |
 
 Open **Settings** to check the detected sources and the status of each adapter. In **Sessions**, use the sync button to force an immediate re-read of the histories. The watcher also refreshes local sources automatically every few seconds.
 
@@ -116,8 +117,11 @@ If the executable is not on `PATH`, point to it for the dashboard process only:
 export NOSTRAXIS_CODEX_BIN='/absolute/path/to/codex'
 export NOSTRAXIS_CLAUDE_BIN='/absolute/path/to/claude'
 export NOSTRAXIS_COPILOT_BIN='/absolute/path/to/copilot'
+export NOSTRAXIS_HERMES_BIN='/absolute/path/to/hermes'
 npm run dev
 ```
+
+Hermes is intentionally observation-only in the initial integration. Its native source is preserved (`desktop`, `cli`, `cron` or a messaging channel) and classified as **Interactive**, **Automation** or **Messaging**. This is a Hermes-specific distinction: its filter and grouping control appear only after selecting Hermes as the provider. By default every native source is imported; `NOSTRAXIS_HERMES_SOURCES` can restrict that set explicitly.
 
 ### Copilot: account quota
 
@@ -150,9 +154,9 @@ This lets you work with Codex, Claude or Copilot while keeping a single panel fo
 | Session type | Origin | What you can do |
 | --- | --- | --- |
 | **Dashboard** | Created with **New session** | See the stream, conversation, commands, files, context, metrics, and cancel a run that is still in progress. |
-| **External** | Discovered in the local histories of Codex, Claude or Copilot | Inspect and filter the observed data. It stays read-only: you must continue or cancel that conversation from its original tool. |
+| **External** | Discovered in the local histories of Codex, Claude, Copilot or Hermes | Inspect and filter the observed data. It stays read-only: you must continue or cancel that conversation from its original tool. |
 
-Use the tabs to switch between active, recent and all sessions; filters narrow by project, provider, model, status, origin, activity, cost and cache. Grouping by project or status makes it easier to follow several open tasks at once.
+Use the tabs to switch between active, recent and all sessions; filters narrow by project, provider, model, status, origin, update time, cost and cache. Grouping by project or status makes it easier to follow several open tasks at once. Selecting Hermes also enables its provider-specific type filter and grouping.
 
 When you select a session, the central panel shows its timeline and, when the source exposes it, tokens, cost, credits, duration and events. Duration is the **active time**: the intervals where the agent was reporting work, measured from the real event timestamps. The time before each user action and any long silence are excluded, so a conversation resumed the next day is not read as a day of execution. The **conversation span** and the **last turn** appear beside it, so the latest interaction can still be measured on its own. The side inspector keeps the repository, branch, commit, prompt, tools and related files. A **Not reported** value means the provider did not deliver it: it never equals zero and is never silently estimated.
 
@@ -184,13 +188,14 @@ The available strategies are `raw-repo`, `knowledge-base` and `llm-wiki`. Unset 
 
 ## Usage, credits and costs
 
-At the top right there are three cards: **Codex / ChatGPT**, **Claude** and **GitHub Copilot**. Click a card to open the source detail, the known model, the connection status and the last update. That way you can check from a single place what each provider allows you to observe.
+At the top right there are cards for **Codex / ChatGPT**, **Claude**, **GitHub Copilot** and **Hermes Agent**. Click a card to open the source detail, the known model, the connection status and the last update. That way you can check from a single place what each provider allows you to observe.
 
 | Provider | Centralized data when available | Correct scope |
 | --- | --- | --- |
 | Codex / ChatGPT | Usage-limit windows, credits/balance and tokens of the most recent Codex session. | The limits shown are the ones Codex records locally; they are not a consolidated ChatGPT bill. |
 | Claude | Authentication status, data from the observed session and tokens/credits Claude reports. | Claude may not expose a total subscription quota in local data; in that case it is shown as unavailable. |
 | Copilot | Plan, monthly credits or premium requests, used, available, reset date and usage observed per date range. | The account quota and the sum of local chats are different sources and are not mixed. |
+| Hermes | Tokens and cost reported by the selected local session. | The current POC reads local session data, not an account-wide quota; absent usage remains unavailable. |
 
 The dashboard distinguishes three concepts that should not be confused:
 
@@ -210,6 +215,8 @@ npm run dev
 Nostraxis is local-first. Its SQLite database lives by default at `.nostraxis/dashboard.sqlite` inside the dashboard project. You can change that location with `NOSTRAXIS_DATA_DIR`.
 
 The watcher imports visible prompts and answers, tool metadata and usage the source reported. It does not import system prompts or hidden reasoning. External sessions are observation only; it does not take control of them.
+
+For Hermes, Nostraxis opens `state.db` in read-only and query-only mode. It never mutates Hermes state, and it does not launch or manage Hermes sessions in this POC.
 
 For VS Code Copilot Chat, Nostraxis reads the editor's local journal but excludes hidden transcript entries, agent instructions, tool payloads and reasoning blocks. The journal format is internal to VS Code, so unknown future records are ignored rather than inferred.
 
@@ -235,6 +242,11 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | `NOSTRAXIS_CODEX_BIN` | Path to the Codex executable when it is not on `PATH`. |
 | `NOSTRAXIS_CLAUDE_BIN` | Path to the Claude executable when it is not on `PATH`. |
 | `NOSTRAXIS_COPILOT_BIN` | Path to the Copilot executable when it is not on `PATH`. |
+| `NOSTRAXIS_HERMES_BIN` | Path to the Hermes executable when it is not on `PATH` or under `~/.local/bin`. |
+| `NOSTRAXIS_HERMES_STATE_DB` | Alternate path to the Hermes SQLite state database. |
+| `NOSTRAXIS_HERMES_SOURCES` | Optional comma-separated allowlist of native Hermes sources. When unset, every source is imported. |
+| `NOSTRAXIS_HERMES_MAX_AGE_DAYS` | Hermes discovery window in days; defaults to `90`. |
+| `NOSTRAXIS_HERMES_MAX_SESSIONS` | Maximum number of Hermes sessions imported; defaults to `200`. |
 | `COPILOT_HOME` | Copilot configuration and state directory. Nostraxis reads its `session-state` child when set. |
 | `NOSTRAXIS_COPILOT_TOKEN` | Short-lived token to query the personal Copilot quota if `gh auth login` is not used. Not stored. |
 | `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON` | JSON array of additional or custom VS Code `workspaceStorage` roots; replaces the platform defaults for this source. |

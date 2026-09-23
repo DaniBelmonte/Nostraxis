@@ -290,7 +290,9 @@ function connectionFor(id, cli, source, auth, usage) {
 }
 
 export function buildProviderUsageSnapshot({ runs = [], providers = [], sources = [], codex = null, claudeAuth = null, copilotQuota = null, range = {}, refreshedAt = new Date().toISOString() } = {}) {
-  const result = ['codex', 'claude', 'copilot'].map((id) => {
+  const providerIds = [...new Set(['codex', 'claude', 'copilot', ...providers.map((provider) => provider.id)])]
+    .filter((id) => id !== 'custom');
+  const result = providerIds.map((id) => {
     const cli = providers.find((item) => item.id === id) || null;
     const source = sources.find((item) => item.provider === id && item.available) || null;
     const runUsage = usageFromRun(latestRunFor(id, runs));
@@ -301,7 +303,7 @@ export function buildProviderUsageSnapshot({ runs = [], providers = [], sources 
     const primaryLimit = id === 'copilot' ? windows.find((window) => finite(window.limit))?.limit ?? null : null;
     return {
       id,
-      name: id === 'codex' ? 'Codex / ChatGPT' : id === 'claude' ? 'Claude' : 'GitHub Copilot',
+      name: cli?.name || (id === 'codex' ? 'Codex / ChatGPT' : id === 'claude' ? 'Claude' : id === 'copilot' ? 'GitHub Copilot' : id),
       version: cli?.version || null,
       connection: connectionFor(id, cli, source, claudeAuth, usage),
       model: usage.model || null,

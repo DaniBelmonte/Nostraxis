@@ -5,7 +5,7 @@ import { PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 import { ChartTooltip } from '../../../shared/components/Observability';
 import { compact } from '../../../shared/lib/metrics';
 
-const PROVIDER_COLORS = { claude: '#69b5ed', codex: '#70c5ac', copilot: '#a69be8', unknown: '#90a9bd' };
+const PROVIDER_COLORS = { claude: '#69b5ed', codex: '#70c5ac', copilot: '#a69be8', hermes: '#f2c86b', unknown: '#90a9bd' };
 const CATEGORIES = [
   ['file system', 'File system', '#4aa3e8'],
   ['search', 'Search', '#a69be8'],
