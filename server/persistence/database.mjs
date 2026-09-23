@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS runs(
   demo INTEGER NOT NULL DEFAULT 0,
   origin TEXT NOT NULL DEFAULT 'dashboard',
   source_path TEXT,
+  source_kind TEXT,
+  workload TEXT,
   usage_scope TEXT,
   active_duration_ms INTEGER,
   last_turn_ms INTEGER,
@@ -113,6 +115,8 @@ const runFromRow = (row) => row ? ({
   origin: row.origin || 'dashboard',
   external: row.origin === 'external',
   sourcePath: row.source_path || null,
+  sourceKind: row.source_kind || null,
+  workload: row.workload || null,
   usageScope: row.usage_scope || null,
   activeDurationMs: Number.isFinite(row.active_duration_ms) ? row.active_duration_ms : null,
   lastTurnDurationMs: Number.isFinite(row.last_turn_ms) ? row.last_turn_ms : null,
@@ -174,6 +178,8 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
   const runColumns = new Set(db.prepare('PRAGMA table_info(runs)').all().map((column) => column.name));
   if (!runColumns.has('origin')) db.exec("ALTER TABLE runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'dashboard'");
   if (!runColumns.has('source_path')) db.exec('ALTER TABLE runs ADD COLUMN source_path TEXT');
+  if (!runColumns.has('source_kind')) db.exec('ALTER TABLE runs ADD COLUMN source_kind TEXT');
+  if (!runColumns.has('workload')) db.exec('ALTER TABLE runs ADD COLUMN workload TEXT');
   if (!runColumns.has('usage_scope')) db.exec('ALTER TABLE runs ADD COLUMN usage_scope TEXT');
   if (!runColumns.has('active_duration_ms')) db.exec('ALTER TABLE runs ADD COLUMN active_duration_ms INTEGER');
   if (!runColumns.has('last_turn_ms')) db.exec('ALTER TABLE runs ADD COLUMN last_turn_ms INTEGER');
@@ -223,9 +229,9 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
       db.prepare(`INSERT INTO runs(
         id,name,repository_id,repository_name,repository_path,provider,model,status,prompt,response,
         native_session_id,started_at,ended_at,updated_at,usage_json,context_snapshot_json,
-        evaluation_json,permissions_json,experiment_id,demo,origin,source_path,usage_scope,
-        active_duration_ms,last_turn_ms
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        evaluation_json,permissions_json,experiment_id,demo,origin,source_path,source_kind,workload,
+        usage_scope,active_duration_ms,last_turn_ms
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, repository_id=excluded.repository_id,
         repository_name=excluded.repository_name, repository_path=excluded.repository_path,
@@ -236,7 +242,8 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
         usage_json=excluded.usage_json, context_snapshot_json=excluded.context_snapshot_json,
         evaluation_json=excluded.evaluation_json, permissions_json=excluded.permissions_json,
         experiment_id=excluded.experiment_id, demo=excluded.demo, origin=excluded.origin,
-        source_path=excluded.source_path, usage_scope=excluded.usage_scope,
+        source_path=excluded.source_path, source_kind=excluded.source_kind,
+        workload=excluded.workload, usage_scope=excluded.usage_scope,
         active_duration_ms=excluded.active_duration_ms, last_turn_ms=excluded.last_turn_ms`).run(
         run.id, run.name, run.repositoryId || null, run.repositoryName || null,
         run.repositoryPath, run.provider, run.model || null, run.status, run.prompt || '',
@@ -245,7 +252,8 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
         run.usage ? JSON.stringify(run.usage) : null,
         JSON.stringify(run.contextSnapshot || {}), run.evaluation ? JSON.stringify(run.evaluation) : null,
         JSON.stringify(run.permissions || {}), run.experimentId || null, run.demo ? 1 : 0,
-        run.origin || 'dashboard', run.sourcePath || null, run.usageScope || null,
+        run.origin || 'dashboard', run.sourcePath || null, run.sourceKind || null,
+        run.workload || null, run.usageScope || null,
         Number.isFinite(run.activeDurationMs) ? run.activeDurationMs : null,
         Number.isFinite(run.lastTurnDurationMs) ? run.lastTurnDurationMs : null,
       );

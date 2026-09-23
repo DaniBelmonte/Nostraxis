@@ -475,6 +475,8 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .agent-icon svg { width: 17px; height: 17px; }
 .agent-icon.provider-claude { color: #e8a06c; }
 .agent-icon.provider-copilot { color: #b9c5ff; }
+.agent-icon.provider-hermes { color: #f2c86b; background: #272115; }
+.hermes-logo { fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 .run-card-check, .run-table .run-card-check { display: grid; place-items: center; cursor: pointer; }
 .run-card-check input, .run-table-row input { width: 15px; height: 15px; accent-color: var(--blue); cursor: pointer; }
 

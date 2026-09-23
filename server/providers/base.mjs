@@ -6,6 +6,8 @@ export const defaultCapabilities = {
   usage: false,
   reasoning: false,
   cost: false,
+  managedRuns: true,
+  history: false,
 };
 
 export function describeProvider(adapter, detected) {
