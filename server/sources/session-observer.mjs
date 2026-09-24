@@ -553,7 +553,7 @@ export function createSessionObserver({
           const result = await buildVscodeCopilotSnapshot(target.vscodeDocument, target.session.filename);
           target.vscodeImportable = Boolean(result);
           if (!result) continue;
-          const signature = JSON.stringify(result.snapshot);
+          const signature = JSON.stringify([result.snapshot, result.events]);
           if (signature === target.signature) continue;
           await onUpdate(result.snapshot, result.events);
           target.signature = signature;
