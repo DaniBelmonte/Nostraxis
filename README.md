@@ -79,7 +79,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:4173](http://localhost:4173). On macOS you can also open `start-dashboard.command`; it starts in its own Terminal window and stays available as long as that window is open.
+Open [http://localhost:4173](http://localhost:4173). The development server restarts its local API when backend files change, so newly added routes become available without a manual restart. On macOS you can also open `start-dashboard.command`; it starts in its own Terminal window and stays available as long as that window is open.
 
 Useful commands:
 
@@ -107,9 +107,9 @@ There are no passwords or subscription keys to configure inside the interface. I
 | GitHub Copilot | GitHub Copilot CLI authenticated | Copilot CLI/Agent sessions in `${COPILOT_HOME:-$HOME/.copilot}/session-state`, plus local VS Code Stable and Insiders Copilot Chat sessions in `workspaceStorage` | Check the matching source separately in **Settings**; for the account quota, sign in with `gh auth login` as well. |
 | Hermes Agent | Not available in this POC | Read-only sessions in `~/.hermes/state.db`, including CLI, cron and messaging channels | That `hermes --version` works and that the SQLite state file is readable. |
 
-Open **Settings** to check the detected sources and the status of each adapter. In **Sessions**, use the sync button to force an immediate re-read of the histories. The watcher also refreshes local sources automatically every few seconds.
+Open **Settings → Session sources** to check detected histories or add a custom provider-history folder or file. Adding a source saves it locally and syncs it immediately; the watcher then refreshes it automatically. In **Sessions**, the sync button forces a re-read. A work-project workspace is the code folder used for grouping, while an agent's history may be stored elsewhere; configure the latter in Settings before expecting its sessions to appear in the project.
 
-Copilot being connected only confirms that its executable or account is available; it does not mean every local conversation uses the same store. Nostraxis labels **GitHub Copilot CLI / Agent** and **VS Code Copilot Chat** separately. The VS Code adapter rebuilds the editor's local `chatSessions` journals, imports only visible user/assistant messages and reported tokens or AI credits, and associates them with the folder in the adjacent `workspace.json`. Histories from another computer are not downloaded from GitHub. Remote SSH, Dev Container, custom `--user-data-dir`, VSCodium or other installations can store data elsewhere; configure their local `workspaceStorage` roots with `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON`.
+Copilot being connected only confirms that its executable or account is available; it does not mean every local conversation uses the same store. Nostraxis labels **GitHub Copilot CLI / Agent** and **VS Code Copilot Chat** separately. The VS Code adapter rebuilds the editor's local `chatSessions` journals, imports only visible user/assistant messages and reported tokens or AI credits, and associates them with the folder in the adjacent `workspace.json`. Histories from another computer are not downloaded from GitHub. Remote SSH, Dev Container, custom `--user-data-dir`, VSCodium or other installations can store data elsewhere; add their local `workspaceStorage` folder in Settings or configure `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON`.
 
 If the executable is not on `PATH`, point to it for the dashboard process only:
 

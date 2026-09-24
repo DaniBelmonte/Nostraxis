@@ -6,7 +6,7 @@ import {
 const navItems = (experimentsEnabled) => [
   ['Sessions', Activity], ['Analytics', ChartBar], ['Compare', ArrowsOut],
   ...(experimentsEnabled ? [['R&D Lab', Flask]] : []),
-  ['Repos', FolderOpen], ['Settings', SlidersHorizontal],
+  ['Projects', FolderOpen], ['Settings', SlidersHorizontal],
 ];
 
 export function AppRail({ active, onChange, online, experimentsEnabled }) {

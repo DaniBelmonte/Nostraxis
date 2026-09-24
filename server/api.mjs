@@ -1,6 +1,7 @@
 import { openDatabase } from './persistence/database.mjs';
 import { EventBus } from './core/event-bus.mjs';
 import { createRepositoryService } from './repositories/service.mjs';
+import { createWorkProjectService } from './work-projects/service.mjs';
 import { createRunManager } from './runtime/run-manager.mjs';
 import { createExperimentService } from './experiments/service.mjs';
 import { detectProviders } from './providers/index.mjs';
@@ -8,8 +9,33 @@ import { buildAnalytics, compareRuns, metricDefinitions, matches } from './metri
 import { buildObservability } from './metrics/observability.mjs';
 import { createExternalSessionService } from './sources/external-session-service.mjs';
 import { createProviderUsageService } from './sources/provider-usage.mjs';
-import { chooseRepositoryFolder } from './repositories/picker.mjs';
+import { chooseRepositoryFolder, chooseSessionSourceFolder, chooseWorkProjectFolder } from './repositories/picker.mjs';
 import { buildRunJsonl, runExportFilename } from './exports/run-jsonl.mjs';
+import { readdir, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
+
+// Folder browsing runs on the same local host as the session-history observer.
+async function browseFolders(requestedPath) {
+  const folderPath = requestedPath || homedir();
+  if (!path.isAbsolute(folderPath)) throw new Error('Enter an absolute folder path.');
+  const resolved = path.resolve(folderPath);
+  let folderStats;
+  try { folderStats = await stat(resolved); }
+  catch (error) { throw new Error(error.code === 'ENOENT' ? 'Folder not found.' : error.code === 'EACCES' ? 'Access to this folder is denied.' : error.message); }
+  if (!folderStats.isDirectory()) throw new Error('The selected path is not a folder.');
+  const entries = await readdir(resolved, { withFileTypes: true });
+  const folders = (await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(resolved, entry.name);
+    if (!entry.isDirectory() && !(entry.isSymbolicLink() && (await stat(entryPath).catch(() => null))?.isDirectory())) return null;
+    return { name: entry.name, path: entryPath };
+  }))).filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  return { path: resolved, parent: path.dirname(resolved) === resolved ? null : path.dirname(resolved), folders, shortcuts: [
+    { name: 'Home', path: homedir() },
+    { name: 'Nostraxis', path: process.cwd() },
+  ] };
+}
 
 const json = (res, status, value) => {
   const body = JSON.stringify(value);
@@ -59,6 +85,7 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
   const store = openDatabase(dataDir);
   const bus = new EventBus();
   const repositories = createRepositoryService(store);
+  const workProjects = createWorkProjectService(store);
   const runs = createRunManager({ store, bus, repositories });
   const experiments = createExperimentService({ store, repositories, runs });
   const externalSessions = createExternalSessionService({ store, bus, repositories });
@@ -91,11 +118,11 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
         }
         if (req.method === 'GET' && route === '/api/dashboard') {
           await providersReady;
-          const allRuns = runs.list();
+          const { runs: allRuns, projects } = workProjects.resolve(runs.list());
           const usage = await providerUsage.get();
           json(res, 200, {
             generatedAt: new Date().toISOString(), providers: providerCache,
-            repositories: repositories.list(), runs: allRuns,
+            repositories: repositories.list(), workProjects: projects, hiddenWorkProjectPaths: store.hiddenWorkProjectPaths(), runs: allRuns,
             analytics: buildAnalytics(allRuns), experiments: experimentsEnabled ? experiments.list() : [],
             metricDefinitions, features: { experiments: experimentsEnabled },
             experimentCatalog: experimentsEnabled ? experiments.catalog() : null,
@@ -103,6 +130,10 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
             externalSessionCount: externalSessions.status().imported,
             providerUsage: usage,
           });
+          return true;
+        }
+        if (req.method === 'GET' && route === '/api/folders') {
+          json(res, 200, await browseFolders(url.searchParams.get('path')));
           return true;
         }
         if (req.method === 'POST' && route === '/api/provider-usage') {
@@ -124,13 +155,68 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
         if (req.method === 'POST' && route === '/api/repositories/pick') {
           json(res, 200, await chooseRepositoryFolder()); return true;
         }
+        if (req.method === 'POST' && route === '/api/work-projects/pick') {
+          json(res, 200, await chooseWorkProjectFolder()); return true;
+        }
         if (req.method === 'POST' && route === '/api/session-sources/sync') {
           const result = await externalSessions.sync();
           bus.publish({ kind: 'sources', ...result });
           json(res, 200, result); return true;
         }
+        if (req.method === 'POST' && route === '/api/session-sources/pick') {
+          json(res, 200, await chooseSessionSourceFolder()); return true;
+        }
+        if (req.method === 'POST' && route === '/api/session-sources') {
+          const result = await externalSessions.addSource(await readBody(req));
+          bus.publish({ kind: 'sources', ...result });
+          json(res, 201, result); return true;
+        }
+        if (req.method === 'DELETE' && route === '/api/session-sources') {
+          const result = await externalSessions.removeSource(await readBody(req));
+          bus.publish({ kind: 'sources', ...result });
+          json(res, 200, result); return true;
+        }
         if (req.method === 'POST' && route === '/api/repositories') {
           json(res, 201, await repositories.add((await readBody(req)).path)); return true;
+        }
+        if (req.method === 'POST' && route === '/api/work-projects') {
+          const project = workProjects.create(await readBody(req));
+          bus.publish({ kind: 'work-projects' });
+          json(res, 201, project); return true;
+        }
+        if (req.method === 'POST' && route === '/api/work-projects/restore') {
+          workProjects.restore((await readBody(req)).folderPath);
+          bus.publish({ kind: 'work-projects' });
+          json(res, 200, { restored: true }); return true;
+        }
+        if (req.method === 'PUT' && route === '/api/work-projects/assign-runs') {
+          const { runIds, projectId } = await readBody(req);
+          const count = workProjects.assignMany(runIds, projectId);
+          bus.publish({ kind: 'work-projects' });
+          json(res, 200, { assigned: count }); return true;
+        }
+        const folderProjectId = matchId(route, '/api/work-projects/', '/folders');
+        if (folderProjectId && req.method === 'POST') {
+          const project = workProjects.addFolder(folderProjectId, (await readBody(req)).folderPath);
+          bus.publish({ kind: 'work-projects' });
+          json(res, 201, project); return true;
+        }
+        if (folderProjectId && req.method === 'DELETE') {
+          const project = workProjects.removeFolder(folderProjectId, (await readBody(req)).folderPath);
+          bus.publish({ kind: 'work-projects' });
+          json(res, 200, project); return true;
+        }
+        const workProjectId = matchId(route, '/api/work-projects/');
+        if (req.method === 'DELETE' && workProjectId) {
+          workProjects.remove(workProjectId);
+          bus.publish({ kind: 'work-projects' });
+          json(res, 200, { removed: true }); return true;
+        }
+        const assignmentRunId = matchId(route, '/api/runs/', '/work-project');
+        if (req.method === 'PUT' && assignmentRunId) {
+          workProjects.assign(assignmentRunId, (await readBody(req)).projectId);
+          bus.publish({ kind: 'work-projects' });
+          json(res, 200, { assigned: true }); return true;
         }
         if (req.method === 'GET' && route === '/api/runs') {
           json(res, 200, runs.list()); return true;

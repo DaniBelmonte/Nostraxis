@@ -46,6 +46,26 @@ CREATE TABLE IF NOT EXISTS runs(
   FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS runs_dimensions ON runs(repository_id, provider, model, started_at);
+CREATE TABLE IF NOT EXISTS work_projects(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  folder_path TEXT UNIQUE,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS work_project_folders(
+  project_id TEXT NOT NULL REFERENCES work_projects(id) ON DELETE CASCADE,
+  folder_path TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, folder_path)
+);
+CREATE TABLE IF NOT EXISTS hidden_work_project_paths(
+  path TEXT PRIMARY KEY,
+  hidden_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_work_projects(
+  run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES work_projects(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS events(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL,
@@ -175,6 +195,9 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path.join(dataDir, 'dashboard.sqlite'));
   db.exec(SCHEMA);
+  // Preserve projects created before one work project could own several folders.
+  db.exec(`INSERT OR IGNORE INTO work_project_folders(project_id,folder_path,created_at)
+    SELECT id,folder_path,created_at FROM work_projects WHERE folder_path IS NOT NULL`);
   const runColumns = new Set(db.prepare('PRAGMA table_info(runs)').all().map((column) => column.name));
   if (!runColumns.has('origin')) db.exec("ALTER TABLE runs ADD COLUMN origin TEXT NOT NULL DEFAULT 'dashboard'");
   if (!runColumns.has('source_path')) db.exec('ALTER TABLE runs ADD COLUMN source_path TEXT');
@@ -273,6 +296,58 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     },
     listRepositories: () => statements.listRepositories.all().map(repositoryFromRow),
     getRepository: (id) => repositoryFromRow(statements.getRepository.get(id)),
+    listWorkProjects: () => db.prepare('SELECT id,name,created_at AS createdAt FROM work_projects ORDER BY name COLLATE NOCASE').all().map((project) => {
+      const folderPaths = db.prepare('SELECT folder_path AS folderPath FROM work_project_folders WHERE project_id=? ORDER BY created_at, rowid').all(project.id).map((row) => row.folderPath);
+      return { ...project, folderPath: folderPaths[0] || null, folderPaths };
+    }),
+    getWorkProject(id) {
+      const project = db.prepare('SELECT id,name,created_at AS createdAt FROM work_projects WHERE id=?').get(id);
+      if (!project) return null;
+      const folderPaths = db.prepare('SELECT folder_path AS folderPath FROM work_project_folders WHERE project_id=? ORDER BY created_at, rowid').all(id).map((row) => row.folderPath);
+      return { ...project, folderPath: folderPaths[0] || null, folderPaths };
+    },
+    saveWorkProject(project) {
+      db.prepare('INSERT INTO work_projects(id,name,folder_path,created_at) VALUES (?,?,?,?)').run(project.id, project.name, project.folderPath, project.createdAt);
+      if (project.folderPath) db.prepare('INSERT INTO work_project_folders(project_id,folder_path,created_at) VALUES (?,?,?)').run(project.id, project.folderPath, project.createdAt);
+      return store.getWorkProject(project.id);
+    },
+    addWorkProjectFolder(projectId, folderPath) {
+      db.prepare('INSERT INTO work_project_folders(project_id,folder_path,created_at) VALUES (?,?,?)').run(projectId, folderPath, new Date().toISOString());
+      return store.getWorkProject(projectId);
+    },
+    removeWorkProjectFolder(projectId, folderPath) {
+      db.exec('BEGIN');
+      try {
+        db.prepare('DELETE FROM work_project_folders WHERE project_id=? AND folder_path=?').run(projectId, folderPath);
+        db.prepare('UPDATE work_projects SET folder_path=NULL WHERE id=? AND folder_path=?').run(projectId, folderPath);
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+      return store.getWorkProject(projectId);
+    },
+    deleteWorkProject(id) {
+      db.exec('BEGIN');
+      try {
+        // Keep affected sessions explicitly unassigned; falling back to their
+        // original broad folder would recreate the clutter the user removed.
+        db.prepare('UPDATE run_work_projects SET project_id=NULL WHERE project_id=?').run(id);
+        db.prepare('DELETE FROM work_projects WHERE id=?').run(id);
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
+    hiddenWorkProjectPaths: () => db.prepare('SELECT path FROM hidden_work_project_paths').all().map((row) => row.path),
+    hideWorkProjectPath: (folderPath) => db.prepare('INSERT OR REPLACE INTO hidden_work_project_paths(path,hidden_at) VALUES (?,?)').run(folderPath, new Date().toISOString()),
+    showWorkProjectPath: (folderPath) => db.prepare('DELETE FROM hidden_work_project_paths WHERE path=?').run(folderPath),
+    runWorkProjectAssignments: () => db.prepare('SELECT run_id AS runId,project_id AS projectId FROM run_work_projects').all(),
+    setRunWorkProject(runId, projectId) {
+      db.prepare('INSERT OR REPLACE INTO run_work_projects(run_id,project_id) VALUES (?,?)').run(runId, projectId);
+    },
+    clearRunWorkProject: (runId) => db.prepare('DELETE FROM run_work_projects WHERE run_id=?').run(runId),
     saveRepository(repo) {
       db.prepare(`INSERT INTO repositories(id,name,path,branch,head_sha,created_at)
         VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,

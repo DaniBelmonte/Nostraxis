@@ -1,98 +1,133 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowsClockwise, ArrowsOut, Brain, CaretDown, CaretRight, ChartLine, Check, Code, Copy,
-  Database, DownloadSimple, FileCode, FileText, Pause, Play, TerminalWindow,
-  Warning, X,
+  Database, DownloadSimple, FileCode, FileText, FolderOpen, MagnifyingGlass,
+  Pause, Play, SlidersHorizontal, TerminalWindow, Warning, X,
 } from '@phosphor-icons/react';
 import {
   Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { buildUsageChartPoints, compact, credits, duration, formatDate, metricsOf, money, paddedChartDomain, percent, statusLabel, statusTone } from '../../../shared/lib/metrics';
-import { Conversation, CommandChart } from '../../../shared/components/Observability';
-import { FilterBar } from '../../../shared/components/FilterBar';
+import { Conversation, CommandChart, DateRange } from '../../../shared/components/Observability';
 import { SessionCard } from '../../../shared/components/SessionCard';
 import { api } from '../../../shared/api/client';
 
-export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync }) {
+const emptyFacets = () => ({ provider: {}, model: {}, state: {} });
+const category = (run) => run.status === 'running' || run.status === 'queued' ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
+
+function matchesFacet(value, modes = {}) {
+  const included = Object.entries(modes).filter(([, mode]) => mode === 'include').map(([key]) => key);
+  return (included.length === 0 || included.includes(value)) && modes[value] !== 'exclude';
+}
+
+function FacetSection({ title, values, modes, onToggle }) {
+  const [query, setQuery] = useState('');
+  const shown = values.filter(([value]) => (value || 'Unknown').toLowerCase().includes(query.toLowerCase()));
+  return <fieldset className="session-facet"><legend>{title}</legend>{values.length > 8 && <input className="session-facet-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Find ${title.toLowerCase()}…`} aria-label={`Find ${title.toLowerCase()}`} />}{shown.map(([value, count]) => <div className="session-facet-row" key={value}>
+    <span title={value}>{value || 'Unknown'}</span><small>{count}</small>
+    <button type="button" className={modes[value] === 'include' ? 'active include' : ''} onClick={() => onToggle(value, 'include')} aria-label={`Include ${title.toLowerCase()} ${value || 'unknown'}`} title="Include">+</button>
+    <button type="button" className={modes[value] === 'exclude' ? 'active exclude' : ''} onClick={() => onToggle(value, 'exclude')} aria-label={`Exclude ${title.toLowerCase()} ${value || 'unknown'}`} title="Exclude">−</button>
+  </div>)}</fieldset>;
+}
+
+export function SessionsPane({ runs, workProjects = [], projectId = 'all', onProjectChange, sources, externalSessionCount, selected, onSelect, onManageProjects, onAssignWorkProject, onAssignShown, onNewSession, onSync }) {
   const [scope, setScope] = useState('all');
   const [groupMode, setGroupMode] = useState('project');
   const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState({ project: 'All', provider: 'All', model: 'All', workload: 'All', state: 'All', origin: 'All', age: 'Any', cost: 'Any', cache: 'Any' });
-  const [openGroups, setOpenGroups] = useState({ live: true, attention: true, completed: true });
+  const [projectQuery, setProjectQuery] = useState('');
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [filters, setFilters] = useState({ workload: 'All', origin: 'All', age: 'Any', cost: 'Any', cache: 'Any' });
+  const [facets, setFacets] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('nostraxis.sessionFilters.v1'));
+      return Object.fromEntries(['provider', 'model', 'state'].map((key) => [key, saved?.[key] && typeof saved[key] === 'object' && !Array.isArray(saved[key]) ? saved[key] : {}]));
+    }
+    catch { return emptyFacets(); }
+  });
+  const [openGroups, setOpenGroups] = useState({});
   const [syncing, setSyncing] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [assignmentError, setAssignmentError] = useState('');
+  const [bulkProjectId, setBulkProjectId] = useState('');
   const [dates, setDates] = useState({ from: '', to: '' });
-  const isHermesSelected = filters.provider === 'hermes';
+  useEffect(() => { try { localStorage.setItem('nostraxis.sessionFilters.v1', JSON.stringify(facets)); } catch { /* Browsing without storage keeps filters for this visit. */ } }, [facets]);
+  const providerIncludes = Object.entries(facets.provider).filter(([, mode]) => mode === 'include').map(([value]) => value);
+  const isHermesSelected = providerIncludes.length === 1 && providerIncludes[0] === 'hermes';
   useEffect(() => {
     if (isHermesSelected) return;
     setFilters((current) => current.workload === 'All' ? current : { ...current, workload: 'All' });
     setGroupMode((current) => current === 'workload' ? 'project' : current);
   }, [isHermesSelected]);
-  const category = (run) => run.status === 'running' || run.status === 'queued' ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
-  const counts = useMemo(() => ({
-    live: runs.filter((run) => category(run) === 'live').length,
-    attention: runs.filter((run) => category(run) === 'attention').length,
-    completed: runs.filter((run) => category(run) === 'completed').length,
-  }), [runs]);
-  const groups = useMemo(() => {
-    const scoped = scope === 'all' ? runs : runs.filter((run) => category(run) === scope);
-    if (groupMode === 'project') {
-      return [...new Set(scoped.map((run) => run.repositoryName || 'No project'))]
-        .map((project) => ({
-          id: `project:${project}`,
-          label: project,
-          sessions: scoped.filter((run) => (run.repositoryName || 'No project') === project),
-        }));
-    }
-    if (groupMode === 'workload') {
-      const labels = { interactive: 'Interactive', automation: 'Automations', messaging: 'Messaging', unspecified: 'Unclassified' };
-      return [...new Set(scoped.map((run) => run.workload || 'unspecified'))]
-        .map((workload) => ({ id: `workload:${workload}`, label: labels[workload] || workload, sessions: scoped.filter((run) => (run.workload || 'unspecified') === workload) }));
-    }
-    return [['live', 'Live'], ['attention', 'Needs attention'], ['completed', 'Completed']]
-      .map(([id, label]) => ({ id, label, sessions: scoped.filter((run) => category(run) === id) }));
-  }, [runs, scope, groupMode]);
-  const options = (key) => ['All', ...new Set(runs.map((run) => run[key]).filter(Boolean))];
-  const tabs = [['all', 'All', runs.length], ['live', 'Live', counts.live], ['attention', 'Attention', counts.attention], ['completed', 'Completed', counts.completed]];
-  const visibleGroups = useMemo(() => groups.map((group) => ({ ...group, sessions: group.sessions.filter((run) => {
-      const metric = metricsOf(run);
-      const search = `${run.name} ${run.id} ${run.repositoryName} ${run.provider} ${run.model} ${run.workload} ${run.sourceKind} ${run.prompt}`.toLowerCase();
-      const ageMs = Date.now() - Date.parse(run.updatedAt || run.startedAt);
-      return search.includes(query.toLowerCase())
-        && (!dates.from || Date.parse(run.startedAt) >= new Date(dates.from+'T00:00:00').getTime())
-        && (!dates.to || Date.parse(run.startedAt) <= new Date(dates.to+'T23:59:59.999').getTime())
-        && (filters.project === 'All' || run.repositoryName === filters.project)
-        && (filters.provider === 'All' || run.provider === filters.provider)
-        && (filters.model === 'All' || run.model === filters.model)
-        && (filters.workload === 'All' || run.workload === filters.workload)
-        && (filters.state === 'All' || run.status === filters.state)
-        && (filters.origin === 'All' || (filters.origin === 'External' ? run.external : !run.external))
-        && (filters.age === 'Any' || ageMs <= (filters.age === '24 hours' ? 86_400_000 : filters.age === '7 days' ? 604_800_000 : 2_592_000_000))
-        && (filters.cost === 'Any' || (filters.cost === '> $1' ? metric.cost > 1 : metric.cost != null && metric.cost < .5))
-        && (filters.cache === 'Any' || (filters.cache === '< 40%' ? metric.cacheHit != null && metric.cacheHit < .4 : metric.cacheHit != null && metric.cacheHit > .6));
-    }) })).filter((group) => group.sessions.length), [groups, query, filters, dates]);
+
+  const updateFacet = (key, value, mode) => setFacets((current) => {
+    const next = { ...current[key] };
+    if (next[value] === mode) delete next[value]; else next[value] = mode;
+    return { ...current, [key]: next };
+  });
   const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-  const sync = async () => { setSyncing(true); try { await onSync(); } finally { setSyncing(false); } };
+  const reset = () => { setQuery(''); onProjectChange('all'); setDates({ from: '', to: '' }); setFilters({ workload: 'All', origin: 'All', age: 'Any', cost: 'Any', cache: 'Any' }); setFacets(emptyFacets()); setScope('all'); };
+  const facetValues = (key) => [...runs.reduce((counts, run) => { const value = run[key] || ''; counts.set(value, (counts.get(value) || 0) + 1); return counts; }, new Map())].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const baseVisible = useMemo(() => runs.filter((run) => {
+    const metric = metricsOf(run);
+    const search = `${run.name} ${run.id} ${run.workProjectName} ${run.repositoryName} ${run.repositoryPath} ${run.provider} ${run.model} ${run.workload} ${run.sourceKind} ${run.prompt}`.toLowerCase();
+    const ageMs = Date.now() - Date.parse(run.updatedAt || run.startedAt);
+    return search.includes(query.trim().toLowerCase())
+      && (projectId === 'all' || (projectId === 'unassigned' ? !run.workProjectId : run.workProjectId === projectId))
+      && (!dates.from || Date.parse(run.startedAt) >= new Date(`${dates.from}T00:00:00`).getTime())
+      && (!dates.to || Date.parse(run.startedAt) <= new Date(`${dates.to}T23:59:59.999`).getTime())
+      && matchesFacet(run.provider || '', facets.provider)
+      && matchesFacet(run.model || '', facets.model)
+      && matchesFacet(run.status || '', facets.state)
+      && (filters.workload === 'All' || run.workload === filters.workload)
+      && (filters.origin === 'All' || (filters.origin === 'External' ? run.external : !run.external))
+      && (filters.age === 'Any' || ageMs <= (filters.age === '24 hours' ? 86_400_000 : filters.age === '7 days' ? 604_800_000 : 2_592_000_000))
+      && (filters.cost === 'Any' || (filters.cost === '> $1' ? metric.cost > 1 : metric.cost != null && metric.cost < .5))
+      && (filters.cache === 'Any' || (filters.cache === '< 40%' ? metric.cacheHit != null && metric.cacheHit < .4 : metric.cacheHit != null && metric.cacheHit > .6));
+  }), [runs, query, projectId, dates, facets, filters]);
+  const counts = { live: baseVisible.filter((run) => category(run) === 'live').length, attention: baseVisible.filter((run) => category(run) === 'attention').length, completed: baseVisible.filter((run) => category(run) === 'completed').length };
+  const visible = scope === 'all' ? baseVisible : baseVisible.filter((run) => category(run) === scope);
+  const groups = useMemo(() => {
+    if (groupMode === 'none') return [{ id: 'all', label: 'Recent sessions', sessions: visible }];
+    const grouped = new Map();
+    for (const run of visible) {
+      let id; let label;
+      if (groupMode === 'project') { id = run.workProjectId || 'unassigned'; label = run.workProjectName || 'Unassigned'; }
+      else if (groupMode === 'state') { id = category(run); label = { live: 'Live', attention: 'Needs attention', completed: 'Completed' }[id]; }
+      else if (groupMode === 'provider') { id = run.provider || 'unknown'; label = id; }
+      else if (groupMode === 'model') { id = run.model || 'unknown'; label = run.model || 'Unknown model'; }
+      else { id = run.workload || 'unspecified'; label = { interactive: 'Interactive', automation: 'Automations', messaging: 'Messaging' }[id] || 'Unclassified'; }
+      if (!grouped.has(id)) grouped.set(id, { id: `${groupMode}:${id}`, label, sessions: [] });
+      grouped.get(id).sessions.push(run);
+    }
+    return [...grouped.values()];
+  }, [visible, groupMode]);
+  const tabs = [['all', 'All', baseVisible.length], ['live', 'Live', counts.live], ['attention', 'Attention', counts.attention], ['completed', 'Completed', counts.completed]];
+  const activeFacets = Object.entries(facets).flatMap(([key, values]) => Object.entries(values).map(([value, mode]) => ({ key, value, mode })));
+  const selectedProject = workProjects.find((project) => project.id === projectId);
+  useEffect(() => { if (projectId !== 'all' && projectId !== 'unassigned' && !selectedProject) onProjectChange('all'); }, [projectId, selectedProject, onProjectChange]);
+  const selectedRun = runs.find((run) => run.id === selected);
+  const manualProjects = workProjects.filter((project) => project.source === 'manual');
+  const projectResults = workProjects.filter((project) => `${project.name} ${(project.folderPaths || [project.folderPath || '']).join(' ')}`.toLowerCase().includes(projectQuery.toLowerCase()));
+  const allCollapsed = groups.length > 0 && groups.every((group) => openGroups[group.id] === false);
   const availableSources = sources.filter((source) => source.available);
   const availableProviders = [...new Set(availableSources.map((source) => source.provider))];
-  const [moreOpen, setMoreOpen] = useState(false);
-  const filterSelect = (key, label, values) => ({ key, label, value: filters[key], options: values, onChange: (value) => update(key, value) });
-  const primaryFilters = [
-    filterSelect('project', 'Project', options('repositoryName')),
-    filterSelect('provider', 'Provider', options('provider')),
-    filterSelect('model', 'Model', options('model')),
-  ];
-  const moreFilters = [
-    ...(isHermesSelected ? [filterSelect('workload', 'Hermes type', options('workload'))] : []),
-    filterSelect('state', 'Status', ['All', 'running', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
-    filterSelect('origin', 'Origin', ['All', 'External', 'Dashboard']),
-    filterSelect('age', 'Updated', ['Any', '24 hours', '7 days', '30 days']),
-    filterSelect('cost', 'Cost', ['Any', '> $1', '< $0.50']),
-    filterSelect('cache', 'Cache hit', ['Any', '< 40%', '> 60%']),
-  ];
-  const allCollapsed = visibleGroups.length > 0 && visibleGroups.every((group) => openGroups[group.id] === false);
+  const sync = async () => { setSyncing(true); try { await onSync(); } finally { setSyncing(false); } };
+  const assign = async (value) => {
+    setAssignmentError('');
+    try { await onAssignWorkProject(selected, value === 'unassigned' ? null : value); }
+    catch (error) { setAssignmentError(error.message); }
+  };
+  const assignShown = async () => {
+    if (!bulkProjectId || !visible.length || visible.length > 500) return;
+    const project = manualProjects.find((item) => item.id === bulkProjectId);
+    if (!project || !window.confirm(`Assign ${visible.length} shown sessions to ${project.name}?`)) return;
+    setAssignmentError('');
+    try { await onAssignShown(visible.map((run) => run.id), bulkProjectId); setBulkProjectId(''); }
+    catch (error) { setAssignmentError(error.message); }
+  };
   const toggleAllGroups = () => setOpenGroups((current) => {
     const next = { ...current };
-    visibleGroups.forEach((group) => { next[group.id] = allCollapsed; });
+    groups.forEach((group) => { next[group.id] = allCollapsed; });
     return next;
   });
 
@@ -101,25 +136,17 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
     <div className="session-tabs" role="tablist">{tabs.map(([id, label, count]) => <button key={id} className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{label} <span>{count}</span></button>)}</div>
     <div className="session-source-strip"><span><i className={availableSources.length ? 'online' : ''} />{externalSessionCount} external</span><small>{availableSources.length ? `${availableProviders.join(' · ')} live` : 'No local sources detected'}</small></div>
     <div className="sessions-controls">
-      <FilterBar
-        query={query} onQuery={setQuery} searchPlaceholder="Search sessions, repos or prompts…"
-        dates={dates} onDates={setDates}
-        primary={primaryFilters} more={moreFilters} moreOpen={moreOpen} onToggleMore={() => setMoreOpen((value) => !value)}
-      />
-      <div className="group-mode">
-        <span>Group by</span>
-        <div className="group-mode-toggle">
-          <button className={groupMode === 'project' ? 'active' : ''} onClick={() => setGroupMode('project')}>Project</button>
-          {isHermesSelected && <button className={groupMode === 'workload' ? 'active' : ''} onClick={() => setGroupMode('workload')}>Hermes type</button>}
-          <button className={groupMode === 'state' ? 'active' : ''} onClick={() => setGroupMode('state')}>Status</button>
-        </div>
-        <button type="button" className="icon-button" onClick={toggleAllGroups} disabled={!visibleGroups.length} aria-label={allCollapsed ? 'Expand all groups' : 'Collapse all groups'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <CaretRight /> : <CaretDown />}</button>
-      </div>
+      <label className="search-field session-search"><MagnifyingGlass /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search projects, sessions, prompts…" aria-label="Search sessions" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><X /></button>}</label>
+      <div className="session-project-picker"><button type="button" className="session-project-trigger" onClick={() => setProjectOpen((value) => !value)} aria-expanded={projectOpen}><FolderOpen /><span>{selectedProject?.name || (projectId === 'unassigned' ? 'Unassigned' : 'All projects')}</span><CaretDown /></button><button type="button" className="session-project-manage" onClick={onManageProjects}>Manage</button></div>
+      {projectOpen && <div className="session-project-menu"><input value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} placeholder="Find a project…" aria-label="Find a project" /><div className="session-project-options"><button type="button" className={projectId === 'all' ? 'active' : ''} onClick={() => { onProjectChange('all'); setProjectOpen(false); }}>All projects <small>{runs.length}</small></button><button type="button" className={projectId === 'unassigned' ? 'active' : ''} onClick={() => { onProjectChange('unassigned'); setProjectOpen(false); }}>Unassigned <small>{runs.filter((run) => !run.workProjectId).length}</small></button>{projectResults.map((project) => <button key={project.id} type="button" className={projectId === project.id ? 'active' : ''} onClick={() => { onProjectChange(project.id); setProjectOpen(false); }} title={(project.folderPaths || [project.folderPath || project.name]).join('\n')}><span><strong>{project.name}</strong><em>{project.source === 'detected' ? 'Detected folder' : 'Work project'}{project.folderPath ? ` · ${project.folderPath}` : ''}</em></span><small>{project.sessionCount}</small></button>)}</div></div>}
+      <div className="session-filter-actions"><button type="button" className={`toolbar-button ${moreOpen ? 'active' : ''}`} onClick={() => setMoreOpen((value) => !value)} aria-expanded={moreOpen}><SlidersHorizontal /> Advanced filters {activeFacets.length > 0 && <span>{activeFacets.length}</span>}</button><button type="button" className="session-reset" onClick={reset}>Reset</button></div>
+      {!!activeFacets.length && <div className="session-filter-chips">{activeFacets.map(({ key, value, mode }) => <button type="button" key={`${key}:${value}`} className={mode} onClick={() => updateFacet(key, value, mode)} title="Remove filter">{mode === 'exclude' ? '−' : '+'} {value || 'Unknown'} <X /></button>)}</div>}
+      {moreOpen && <div className="session-advanced"><p>Include (+) or exclude (−) any combination. Your choices persist in this browser.</p><FacetSection title="Providers" values={facetValues('provider')} modes={facets.provider} onToggle={(value, mode) => updateFacet('provider', value, mode)} /><FacetSection title="Models" values={facetValues('model')} modes={facets.model} onToggle={(value, mode) => updateFacet('model', value, mode)} /><FacetSection title="Statuses" values={facetValues('status')} modes={facets.state} onToggle={(value, mode) => updateFacet('state', value, mode)} />{isHermesSelected && <label>Hermes type<select value={filters.workload} onChange={(event) => update('workload', event.target.value)}>{['All', 'interactive', 'automation', 'messaging'].map((value) => <option key={value}>{value}</option>)}</select></label>}<label>Origin<select value={filters.origin} onChange={(event) => update('origin', event.target.value)}>{['All', 'External', 'Dashboard'].map((value) => <option key={value}>{value}</option>)}</select></label><label>Updated<select value={filters.age} onChange={(event) => update('age', event.target.value)}>{['Any', '24 hours', '7 days', '30 days'].map((value) => <option key={value}>{value}</option>)}</select></label><label>Cost<select value={filters.cost} onChange={(event) => update('cost', event.target.value)}>{['Any', '> $1', '< $0.50'].map((value) => <option key={value}>{value}</option>)}</select></label><label>Cache hit<select value={filters.cache} onChange={(event) => update('cache', event.target.value)}>{['Any', '< 40%', '> 60%'].map((value) => <option key={value}>{value}</option>)}</select></label><DateRange {...dates} onChange={setDates} /></div>}
+      {selectedRun && <details className="session-assignment"><summary>Assign selected session <span>{selectedRun.workProjectName || 'Unassigned'}</span></summary><label>Work project<select value={selectedRun.workProjectAssignment || 'auto'} onChange={(event) => assign(event.target.value)}><option value="auto">Automatic {selectedRun.workProjectAssignment === 'auto' && selectedRun.workProjectName ? `· ${selectedRun.workProjectName}` : ''}</option><option value="unassigned">Unassigned</option>{manualProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>{assignmentError && <small role="alert">{assignmentError}</small>}</details>}
+      {!!manualProjects.length && <details className="session-assignment session-bulk"><summary>Assign shown sessions <span>{visible.length}</span></summary><p>Search and filter first, then assign the visible results together.</p><select value={bulkProjectId} onChange={(event) => setBulkProjectId(event.target.value)} aria-label="Target work project"><option value="">Choose a work project…</option>{manualProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><button className="toolbar-button" type="button" disabled={!bulkProjectId || !visible.length || visible.length > 500} onClick={assignShown}>Assign {visible.length} shown</button>{visible.length > 500 && <small>Filter to 500 sessions or fewer.</small>}</details>}
+      <div className="session-list-tools"><span>{visible.length} shown</span><label>Group by<select value={groupMode} onChange={(event) => setGroupMode(event.target.value)}><option value="project">Project</option><option value="state">Status</option><option value="provider">Provider</option><option value="model">Model</option><option value="none">None</option>{isHermesSelected && <option value="workload">Hermes type</option>}</select></label><button type="button" className="icon-button" onClick={toggleAllGroups} disabled={!groups.length} aria-label={allCollapsed ? 'Expand all groups' : 'Collapse all groups'} title={allCollapsed ? 'Expand all' : 'Collapse all'}>{allCollapsed ? <CaretRight /> : <CaretDown />}</button></div>
     </div>
-    <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync Codex, Claude, Copilot or Hermes, or start a session here.</span></div>}{visibleGroups.map((group) => <section key={group.id} className="session-group">
-      <button className="group-heading" onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}><span>{group.label} ({group.sessions.length})</span>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}</button>
-      {openGroups[group.id] !== false && group.sessions.map((session) => <SessionCard key={session.id} session={session} selected={selected === session.id} onSelect={onSelect} />)}
-    </section>)}</div>
+    <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync an agent source or start a session here.</span></div>}{runs.length > 0 && !visible.length && <div className="sessions-empty"><MagnifyingGlass /><strong>No matching sessions</strong><span>Adjust the project or filters to see more.</span><button type="button" className="toolbar-button" onClick={reset}>Reset filters</button></div>}{groups.map((group) => <section key={group.id} className="session-group"><button className="group-heading" onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}><span>{group.label} ({group.sessions.length})</span>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}</button>{openGroups[group.id] !== false && group.sessions.map((session) => <SessionCard key={session.id} session={session} selected={selected === session.id} onSelect={onSelect} />)}</section>)}</div>
   </aside>;
 }
 
@@ -271,7 +298,7 @@ export function MainTrace({ detail, hasRuns, paused, onPause, onCompare, onRawEv
   const lastEvent = events.at(-1);
   return <main className="trace-pane">
     <header className="trace-toolbar">
-      <div className="breadcrumb"><Database /><span>{run.repositoryName || 'no repo'}</span><CaretRight /><strong>{run.name}</strong><span className={`state-pill ${statusTone(run.status)}`}>{statusLabel(run.status)}</span></div>
+      <div className="breadcrumb"><Database /><span>{run.workProjectName || 'Unassigned'}</span><CaretRight /><strong>{run.name}</strong><span className={`state-pill ${statusTone(run.status)}`}>{statusLabel(run.status)}</span></div>
       <div className="trace-time"><strong>{duration(metrics.durationMs)} active</strong><small>Span {duration(metrics.totalDurationMs)} · last turn {duration(lastTurnMs)}</small><small>Started: {formatDate(run.startedAt)}</small></div>
       <div className="toolbar-actions">
         {run.status === 'running' && !run.external && <button className="toolbar-button" onClick={onCancel}><span>Cancel</span></button>}
@@ -366,7 +393,7 @@ export function ContextPane({ detail, tab, onTab, contextWidth, onResizeStart, o
     <div className="context-tabs">{tabs.map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => onTab(id)}>{label}</button>)}</div>
     {tab === 'knowledge' && <div className="context-scroll">
       <section className="context-section"><h3>Session summary</h3><dl className="session-facts">
-        <dt>Name</dt><dd>{run.name}</dd><dt>Provider</dt><dd><code>{run.provider}</code></dd><dt>Project</dt><dd><a>{run.repositoryName || '—'}</a></dd>
+        <dt>Name</dt><dd>{run.name}</dd><dt>Provider</dt><dd><code>{run.provider}</code></dd><dt>Project</dt><dd>{run.workProjectName || 'Unassigned'}</dd>
         <dt>Repository</dt><dd className="copy-value"><code>{run.repositoryPath}</code><button onClick={() => { navigator.clipboard?.writeText(run.repositoryPath); setCopied(true); setTimeout(() => setCopied(false), 1200); }} aria-label="Copy repository">{copied ? <Check /> : <Copy />}</button></dd>
         <dt>Branch</dt><dd><code>{snapshot.repository?.branch || 'Not reported'}</code></dd><dt>Model</dt><dd><code>{run.model || 'Automatic'}</code></dd>
         <dt>Provider session ID</dt><dd><code>{run.nativeSessionId || 'Not reported'}</code></dd><dt>Origin</dt><dd>{run.external ? 'Observed external session' : 'Dashboard'}</dd>

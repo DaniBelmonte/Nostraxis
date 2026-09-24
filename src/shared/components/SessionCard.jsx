@@ -10,9 +10,7 @@ export function SessionCard({ session, selected, onSelect }) {
     ? `${credits(metrics.credits)} credits`
     : Number.isFinite(metrics.cost) ? money(metrics.cost) : null;
   const workloadLabel = ({ interactive: 'Interactive', automation: 'Automation', messaging: 'Messaging' })[session.workload];
-  const contextLabel = session.repositoryName && session.repositoryName !== 'No project'
-    ? session.repositoryName
-    : workloadLabel || 'No project';
+  const contextLabel = session.workProjectName || workloadLabel || 'Unassigned';
   return <button className={`session-card ${selected ? 'selected' : ''}`} onClick={() => onSelect(session.id)}>
     <span className={`agent-icon provider-${session.provider}`} title={PROVIDER_NAMES[session.provider] || session.provider}>
       <AgentIcon id={session.provider} />

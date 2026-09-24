@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createSessionObserver, defaultSessionSources } from './session-observer.mjs';
 import { mergeCopilotUsage } from './copilot-otel.mjs';
@@ -11,7 +12,20 @@ const eventKey = (runId, event) => createHash('sha256')
   .slice(0, 24);
 
 export function createExternalSessionService({ store, bus, repositories, roots, observerOptions = {} }) {
-  let imported = 0;
+  let imported = store.listRuns().filter((item) => item.origin === 'external').length;
+  const sourceTypes = new Map([
+    ['codex:provider-log', 'Codex history'],
+    ['claude:provider-log', 'Claude Code history'],
+    ['copilot:provider-log', 'GitHub Copilot CLI / Agent'],
+    ['copilot:vscode-chat', 'VS Code Copilot Chat'],
+    ['copilot:copilot-otel', 'GitHub Copilot OpenTelemetry'],
+    ['hermes:hermes-sqlite', 'Hermes Agent'],
+  ]);
+  const sourceKey = (item) => `${item.provider}:${item.format || 'provider-log'}:${path.resolve(item.root)}`;
+  const baseRoots = roots || defaultSessionSources({ copilotTelemetryRoot: path.join(store.dataDir, 'copilot-otel') });
+  const savedCustomRoots = store.setting('sessionSources.custom', []);
+  let customRoots = (Array.isArray(savedCustomRoots) ? savedCustomRoots : []).filter((item) => item?.provider && item?.root);
+  const allRoots = () => [...baseRoots, ...customRoots];
 
   const usageFor = (existing, snapshot) => {
     if (!existing?.usage) return snapshot.usage;
@@ -138,12 +152,42 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
     return run;
   }
 
-  const observerRoots = roots || defaultSessionSources({ copilotTelemetryRoot: path.join(store.dataDir, 'copilot-otel') });
-  const observer = createSessionObserver({ ...observerOptions, roots: observerRoots, onUpdate: importSession });
+  const observer = createSessionObserver({ ...observerOptions, roots: allRoots(), onUpdate: importSession });
   return {
     start: () => observer.start(),
     sync: async () => { await observer.sync(); return { sources: observer.status(), imported }; },
     status: () => ({ sources: observer.status(), imported }),
+    async addSource(input) {
+      const provider = String(input?.provider || '').trim();
+      const format = String(input?.format || 'provider-log').trim();
+      const label = sourceTypes.get(`${provider}:${format}`);
+      if (!label) throw new Error('Choose a supported session source type.');
+      const requested = String(input?.root || '').trim();
+      if (!path.isAbsolute(requested) || path.resolve(requested) === path.parse(requested).root) throw new Error('Choose an absolute session history path.');
+      let root;
+      try { root = await realpath(requested); }
+      catch { throw new Error('Session history path does not exist or cannot be read.'); }
+      const info = await stat(root);
+      const fileSource = format === 'hermes-sqlite' || format === 'copilot-otel';
+      if (fileSource ? !info.isFile() : !info.isDirectory()) throw new Error(fileSource ? 'Select the session history file for this source.' : 'Select a folder containing session history logs.');
+      const source = { provider, format, root, label, custom: true };
+      if (allRoots().some((item) => sourceKey(item) === sourceKey(source))) throw new Error('This session source is already configured.');
+      customRoots = [...customRoots, source];
+      store.saveSetting('sessionSources.custom', customRoots);
+      await observer.setRoots(allRoots());
+      return { source, sources: observer.status(), imported };
+    },
+    async removeSource(input) {
+      const requested = String(input?.root || '').trim();
+      if (!path.isAbsolute(requested)) throw new Error('Custom session source not found.');
+      const root = await realpath(requested).catch(() => path.resolve(requested));
+      const key = sourceKey({ provider: input?.provider || '', format: input?.format || 'provider-log', root });
+      if (!customRoots.some((item) => sourceKey(item) === key)) throw new Error('Custom session source not found.');
+      customRoots = customRoots.filter((item) => sourceKey(item) !== key);
+      store.saveSetting('sessionSources.custom', customRoots);
+      await observer.setRoots(allRoots());
+      return { sources: observer.status(), imported };
+    },
     close: () => observer.close(),
   };
 }

@@ -607,6 +607,20 @@ export function createSessionObserver({
     status: () => status.map((item) => ({ ...item })),
     start() { timer = setInterval(() => void poll(), intervalMs); timer.unref?.(); return poll(); },
     async sync() { lastDiscovery = 0; return poll(); },
+    async setRoots(nextRoots) {
+      if (pending) await pending;
+      const sourceId = (item) => `${item.provider}:${item.format || 'provider-log'}:${item.root}`;
+      const existing = new Map(status.map((item) => [sourceId(item), item]));
+      const kept = new Set(nextRoots.map(sourceId));
+      status.splice(0, status.length, ...nextRoots.map((item) => ({
+        ...item, available: false, count: 0, error: null, lastSyncAt: null,
+        ...(existing.get(sourceId(item)) || {}),
+      })));
+      for (const [id, target] of tracked) if (!kept.has(target.sourceId)) tracked.delete(id);
+      for (const id of sourceSignatures.keys()) if (!kept.has(id)) sourceSignatures.delete(id);
+      lastDiscovery = 0;
+      return poll();
+    },
     async close() { closed = true; clearInterval(timer); await pending; },
   };
 }

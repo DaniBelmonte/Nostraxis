@@ -21,6 +21,7 @@ import '@fontsource/jetbrains-mono/500.css';
 export function App() {
   const { data, error: loadError, reload } = useDashboard();
   const [activeNav, setActiveNav] = useState('Sessions');
+  const [sessionProjectId, setSessionProjectId] = useState('all');
   const [selectedSession, setSelectedSession] = useState('');
   const [detail, setDetail] = useState(null);
   const [paused, setPaused] = useState(false);
@@ -39,6 +40,12 @@ export function App() {
   }, [selectedSession, data?.generatedAt]);
 
   const inspect = (id) => { setSelectedSession(id); setActiveNav('Sessions'); };
+  const viewProjectSessions = (projectId) => {
+    setSessionProjectId(projectId);
+    const firstSession = data.runs.find((run) => run.workProjectId === projectId);
+    if (firstSession) setSelectedSession(firstSession.id);
+    setActiveNav('Sessions');
+  };
   const cancel = async () => {
     try { await api.cancelRun(selectedSession); await reload(); }
     catch (reason) { setActionError(reason.message); }
@@ -78,19 +85,23 @@ export function App() {
   };
 
   if (!data) return <div className="boot-screen"><Robot weight="duotone" /><h1>Nostraxis</h1><p>{loadError || 'Starting local runtime, API and SQLite…'}</p></div>;
+  const selectedRun = data.runs.find((run) => run.id === selectedSession);
+  const displayedDetail = detail?.run?.id === selectedSession && selectedRun
+    ? { ...detail, run: { ...detail.run, workProjectId: selectedRun.workProjectId, workProjectName: selectedRun.workProjectName } }
+    : detail;
   return <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={contextPaneWidth ? { '--context-pane-width': `${contextPaneWidth}px` } : undefined}>
     <AppRail active={activeNav} onChange={setActiveNav} online={!loadError} experimentsEnabled={data.features?.experiments === true} />
     <ProviderUsageDock initial={data.providerUsage} />
     {activeNav === 'Sessions' && <>
-      <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} />
-      <MainTrace detail={detail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Repos')} />
-      <ContextPane detail={detail} tab={contextTab} onTab={setContextTab} contextWidth={contextPaneWidth ?? 392} onResizeStart={startContextResize} onResizeKeyDown={adjustContextPane} />
+      <SessionsPane runs={data.runs} workProjects={data.workProjects || []} projectId={sessionProjectId} onProjectChange={setSessionProjectId} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onManageProjects={() => setActiveNav('Projects')} onAssignWorkProject={async (runId, projectId) => { await api.assignWorkProject(runId, projectId); await reload(); }} onAssignShown={async (runIds, projectId) => { await api.assignWorkProjectRuns(runIds, projectId); await reload(); }} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} />
+      <MainTrace detail={displayedDetail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Projects')} />
+      <ContextPane detail={displayedDetail} tab={contextTab} onTab={setContextTab} contextWidth={contextPaneWidth ?? 392} onResizeStart={startContextResize} onResizeKeyDown={adjustContextPane} />
     </>}
     {activeNav === 'Analytics' && <AnalyticsView initial={data.analytics} repositories={data.repositories} />}
     {activeNav === 'Compare' && <CompareView runs={data.runs} focusId={selectedSession} onInspect={inspect} />}
     {data.features?.experiments === true && activeNav === 'R&D Lab' && <LabView data={data} reload={reload} setError={setError} />}
-    {activeNav === 'Repos' && <RepositoriesView repositories={data.repositories} reload={reload} setError={setError} />}
-    {activeNav === 'Settings' && <SettingsView data={data} />}
+    {activeNav === 'Projects' && <RepositoriesView repositories={data.repositories} workProjects={data.workProjects || []} hiddenWorkProjectPaths={data.hiddenWorkProjectPaths || []} onViewSessions={viewProjectSessions} onManageSources={() => setActiveNav('Settings')} reload={reload} setError={setError} />}
+    {activeNav === 'Settings' && <SettingsView data={data} reload={reload} />}
 
     {actionError && <div className="toast-error"><WarningIcon />{actionError}<button onClick={() => setActionError('')}><X /></button></div>}
     {modal === 'new' && <Modal title="New session" onClose={() => setModal(null)}><NewRunForm data={data} onError={setError} onCreated={(run) => { setSelectedSession(run.id); setModal(null); reload(); }} /></Modal>}

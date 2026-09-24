@@ -27,7 +27,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "dev": "node server/start.mjs --dev",
+    "dev": "node scripts/dev.mjs",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "start": "node server/start.mjs",
     "preview": "vite preview",

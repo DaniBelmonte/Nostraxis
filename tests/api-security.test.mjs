@@ -103,6 +103,44 @@ test('API rejects cross-site browser callers and unsafe requests without JSON', 
   assert.equal(listing.status, 200);
   assert.equal(listing.json.length, 1);
 
+  const folderListing = await call(api, { method: 'GET', url: `/api/folders?path=${encodeURIComponent(dir)}` });
+  assert.equal(folderListing.status, 200);
+  assert.equal(folderListing.json.path, path.resolve(dir));
+  assert.ok(Array.isArray(folderListing.json.folders));
+  assert.equal((await call(api, { method: 'GET', url: '/api/folders?path=relative-folder' })).status, 400);
+
+  const createdProject = await call(api, {
+    url: '/api/work-projects', headers: json,
+    body: JSON.stringify({ name: 'Personal tools', folderPath: path.join(dir, 'workspace-one') }),
+  });
+  assert.equal(createdProject.status, 201);
+  const folderRoute = `/api/work-projects/${encodeURIComponent(createdProject.json.id)}/folders`;
+  const addedFolder = await call(api, {
+    url: folderRoute, headers: json, body: JSON.stringify({ folderPath: path.join(dir, 'workspace-two') }),
+  });
+  assert.equal(addedFolder.status, 201);
+  assert.equal(addedFolder.json.folderPaths.length, 2);
+  const removedFolder = await call(api, {
+    method: 'DELETE', url: folderRoute, headers: json,
+    body: JSON.stringify({ folderPath: path.join(dir, 'workspace-two') }),
+  });
+  assert.equal(removedFolder.status, 200);
+  assert.deepEqual(removedFolder.json.folderPaths, [path.join(dir, 'workspace-one')]);
+
+  const addedSource = await call(api, {
+    url: '/api/session-sources', headers: json,
+    body: JSON.stringify({ provider: 'codex', format: 'provider-log', root: dir }),
+  });
+  assert.equal(addedSource.status, 201);
+  assert.equal(addedSource.json.source.custom, true);
+  assert.ok(addedSource.json.sources.some((source) => source.root === addedSource.json.source.root && source.custom));
+  const removedSource = await call(api, {
+    method: 'DELETE', url: '/api/session-sources', headers: json,
+    body: JSON.stringify({ provider: 'codex', format: 'provider-log', root: dir }),
+  });
+  assert.equal(removedSource.status, 200);
+  assert.equal(removedSource.json.sources.some((source) => source.root === addedSource.json.source.root && source.custom), false);
+
   await api.close();
   await rm(dir, { recursive: true });
 });
