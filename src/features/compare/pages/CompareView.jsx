@@ -52,8 +52,9 @@ function pageWindow(current, total) {
   return [...pages].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
 }
 
-export function CompareView({ runs, focusId, onInspect }) {
-  const [selectedIds, setSelectedIds] = useState(() => [focusId].filter(Boolean));
+export function CompareView({ runs, focusId, initialIds, onInspect }) {
+  const [selectedIds, setSelectedIds] = useState(() => initialIds?.length ? initialIds.slice(0, MAX_RUNS) : [focusId].filter(Boolean));
+  useEffect(() => { if (initialIds?.length) setSelectedIds(initialIds.slice(0, MAX_RUNS)); }, [initialIds]);
   const [query, setQuery] = useState('');
   const [dates, setDates] = useState({ from: '', to: '' });
   const [filters, setFilters] = useState({ project: 'All', agent: 'All', model: 'All' });

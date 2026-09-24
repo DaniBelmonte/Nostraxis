@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -108,6 +108,9 @@ test('API rejects cross-site browser callers and unsafe requests without JSON', 
   assert.equal(folderListing.json.path, path.resolve(dir));
   assert.ok(Array.isArray(folderListing.json.folders));
   assert.equal((await call(api, { method: 'GET', url: '/api/folders?path=relative-folder' })).status, 400);
+
+  await mkdir(path.join(dir, 'workspace-one'));
+  await mkdir(path.join(dir, 'workspace-two'));
 
   const createdProject = await call(api, {
     url: '/api/work-projects', headers: json,

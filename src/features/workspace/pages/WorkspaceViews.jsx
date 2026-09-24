@@ -33,16 +33,34 @@ export function LabView({ data, reload, setError }) {
   </PageShell>;
 }
 
-export function RepositoriesView({ repositories, workProjects = [], hiddenWorkProjectPaths = [], onViewSessions, onManageSources, reload, setError }) {
+export function RepositoriesView({ repositories, workProjects = [], workItems = [], hiddenWorkProjectPaths = [], onViewSessions, onViewWorkItemSessions, onAnalyze, onManageSources, reload, setError }) {
   const [path, setPath] = useState('');
   const [projectName, setProjectName] = useState('');
   const [projectFolder, setProjectFolder] = useState('');
+  const [projectExtraFolders, setProjectExtraFolders] = useState([]);
   const [busy, setBusy] = useState(false);
   const [pathError, setPathError] = useState('');
   const [projectFolderError, setProjectFolderError] = useState('');
   const [workspacePaths, setWorkspacePaths] = useState({});
   const [workspaceErrors, setWorkspaceErrors] = useState({});
   const [folderDialog, setFolderDialog] = useState(null);
+  const [itemDrafts, setItemDrafts] = useState({});
+  const createItem = async (event, project) => {
+    event.preventDefault();
+    const draft = itemDrafts[project.id] || {};
+    if (!draft.title?.trim()) return;
+    setBusy(true);
+    try { await api.createWorkItem({ projectId: project.id, kind: draft.kind || 'task', title: draft.title.trim() }); setItemDrafts((current) => ({ ...current, [project.id]: { kind: draft.kind || 'task', title: '' } })); await reload(); }
+    catch (error) { setError(error.message); }
+    finally { setBusy(false); }
+  };
+  const removeItem = async (item) => {
+    if (!window.confirm(`Remove ${item.kind}: ${item.title}? Sessions will return to Unassigned in this project.`)) return;
+    setBusy(true);
+    try { await api.removeWorkItem(item.id); await reload(); }
+    catch (error) { setError(error.message); }
+    finally { setBusy(false); }
+  };
   const submit = async (event) => {
     event.preventDefault();
     const requestedPath = path.trim();
@@ -58,8 +76,8 @@ export function RepositoriesView({ repositories, workProjects = [], hiddenWorkPr
     if (!folderPath) { setProjectFolderError('Choose a folder for this work project.'); return; }
     setBusy(true); setProjectFolderError('');
     try {
-      await api.createWorkProject({ name: projectName, folderPath });
-      setProjectName(''); setProjectFolder('');
+      await api.createWorkProject({ name: projectName, folderPaths: [folderPath, ...projectExtraFolders] });
+      setProjectName(''); setProjectFolder(''); setProjectExtraFolders([]);
       try { await reload(); }
       catch (error) { setError(`Project created, but the list could not refresh: ${error.message}`); }
     } catch (error) {
@@ -72,6 +90,10 @@ export function RepositoriesView({ repositories, workProjects = [], hiddenWorkPr
     setProjectFolder(folderPath);
     setProjectFolderError('');
     if (!projectName.trim()) setProjectName(folderPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'New work project');
+  };
+  const selectExtraProjectFolder = async (folderPath) => {
+    if (folderPath === projectFolder || projectExtraFolders.includes(folderPath)) return;
+    setProjectExtraFolders((current) => [...current, folderPath]);
   };
   const addWorkspace = async (project, folderPath) => {
     if (!folderPath.trim()) { setWorkspaceErrors((current) => ({ ...current, [project.id]: 'Select a folder or enter its absolute path.' })); return; }
@@ -120,16 +142,17 @@ export function RepositoriesView({ repositories, workProjects = [], hiddenWorkPr
         <div className="projects-panel-body"><div className="project-create-intro"><h3>Create a work project</h3><p>Start with one workspace folder. You can add more workspaces or assign individual sessions later. Missing sessions? Configure the agent’s history path in <button type="button" onClick={onManageSources}>Settings</button>.</p></div>
           <form className="work-project-form" onSubmit={createProject}>
             <label>Project name<input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="e.g. Strava MCP" maxLength={100} required /></label>
-            <div className="work-project-folder-field"><label htmlFor="work-project-folder">First workspace folder</label><div className="work-project-folder-control"><input id="work-project-folder" value={projectFolder} onChange={(event) => { setProjectFolder(event.target.value); setProjectFolderError(''); }} placeholder="No folder selected" required aria-invalid={Boolean(projectFolderError)} aria-describedby="work-project-folder-help" /><button className="secondary-button" type="button" disabled={busy} onClick={() => setFolderDialog({ kind: 'create', initialPath: projectFolder })}><FolderOpen /> Select folder</button></div><small id="work-project-folder-help" className={projectFolderError ? 'form-error' : 'repo-field-hint'}>{projectFolderError || 'Select a folder or enter an absolute path. Matching sessions join automatically.'}</small></div>
+            <div className="work-project-folder-field"><label htmlFor="work-project-folder">Workspace folders</label><div className="work-project-folder-control"><input id="work-project-folder" value={projectFolder} onChange={(event) => { setProjectFolder(event.target.value); setProjectFolderError(''); }} placeholder="No folder selected" required aria-invalid={Boolean(projectFolderError)} aria-describedby="work-project-folder-help" /><button className="secondary-button" type="button" disabled={busy} onClick={() => setFolderDialog({ kind: 'create', initialPath: projectFolder })}><FolderOpen /> Select folder</button></div><small id="work-project-folder-help" className={projectFolderError ? 'form-error' : 'repo-field-hint'}>{projectFolderError || 'Select a folder or enter an absolute path. Matching sessions join automatically.'}</small>{projectExtraFolders.map((folderPath) => <div className="project-create-extra" key={folderPath}><code>{folderPath}</code><button type="button" aria-label={`Remove ${folderPath}`} onClick={() => setProjectExtraFolders((current) => current.filter((item) => item !== folderPath))}><X /></button></div>)}<button className="secondary-button project-create-more" type="button" disabled={busy || !projectFolder.trim()} onClick={() => setFolderDialog({ kind: 'create-add', initialPath: projectExtraFolders.at(-1) || projectFolder })}><Plus /> Add another folder</button></div>
             <div className="project-create-actions"><button className="primary-button" disabled={busy || !projectName.trim() || !projectFolder.trim()}>Create work project</button></div>
           </form>
         </div>
         <div className="project-collection"><div className="project-collection-heading"><h3>Your work projects</h3><span>{manualProjects.length}</span></div>
           {manualProjects.length ? manualProjects.map((project) => {
             const folderPaths = project.folderPaths || (project.folderPath ? [project.folderPath] : []);
-            return <article className="project-card" key={project.id}><div className="project-card-top"><div><h4>{project.name}</h4><p>{project.sessionCount} {project.sessionCount === 1 ? 'session' : 'sessions'} · {folderPaths.length} {folderPaths.length === 1 ? 'workspace' : 'workspaces'}</p></div><div className="project-card-controls"><button className="project-view-button" type="button" disabled={!project.sessionCount} onClick={() => onViewSessions(project.id)}>View sessions</button><button className="project-remove-button" type="button" disabled={busy} onClick={() => removeProject(project)}>Remove project</button></div></div>
+            return <article className="project-card" key={project.id}><div className="project-card-top"><div><h4>{project.name}</h4><p>{project.sessionCount} {project.sessionCount === 1 ? 'session' : 'sessions'} · {folderPaths.length} {folderPaths.length === 1 ? 'workspace' : 'workspaces'}</p></div><div className="project-card-controls"><button className="project-view-button" type="button" disabled={!project.sessionCount} onClick={() => onViewSessions(project.id)}>View sessions</button><button className="project-view-button" type="button" disabled={!project.sessionCount} onClick={() => onAnalyze({ projectId: project.id }, `${project.name} · Project analysis`)}>Analyze</button><button className="project-remove-button" type="button" disabled={busy} onClick={() => removeProject(project)}>Remove project</button></div></div>
               <div className="project-workspace-list">{folderPaths.length ? folderPaths.map((folderPath) => <div className="project-workspace" key={folderPath}><FolderOpen /><code title={folderPath}>{folderPath}</code><button type="button" title="Remove workspace" aria-label={`Remove workspace ${folderPath}`} disabled={busy} onClick={() => removeWorkspace(project, folderPath)}><X /></button></div>) : <p>No workspace folders yet. Sessions can still be assigned manually.</p>}</div>
               <div className="project-workspace-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setFolderDialog({ kind: 'add', project, initialPath: project.folderPaths?.[0] || '' })}><Plus /> Select folder to add workspace</button><details><summary>Enter path manually</summary><form onSubmit={(event) => { event.preventDefault(); addWorkspace(project, workspacePaths[project.id] || ''); }}><label htmlFor={`workspace-path-${project.id}`}>Absolute folder path</label><div><input id={`workspace-path-${project.id}`} value={workspacePaths[project.id] || ''} onChange={(event) => { setWorkspacePaths((current) => ({ ...current, [project.id]: event.target.value })); setWorkspaceErrors((current) => ({ ...current, [project.id]: '' })); }} placeholder="/Users/me/workspace" /><button className="toolbar-button" disabled={busy || !(workspacePaths[project.id] || '').trim()}>Add</button></div></form></details></div>
+              <div className="project-items"><div className="project-items-heading"><strong>Work items</strong><span>{workItems.filter((item) => item.projectId === project.id).length}</span></div><button type="button" className="project-item-row" onClick={() => onViewWorkItemSessions(project.id, 'unassigned')}><span>Unassigned</span><small>{project.sessionCount - workItems.filter((item) => item.projectId === project.id).reduce((sum, item) => sum + item.sessionCount, 0)} sessions</small></button>{workItems.filter((item) => item.projectId === project.id).map((item) => <div className="project-item-row" key={item.id}><button type="button" onClick={() => onViewWorkItemSessions(project.id, item.id)}><span>{item.kind}: {item.title}</span><small>{item.sessionCount} sessions</small></button><button type="button" title="Analyze work item" onClick={() => onAnalyze({ workItemId: item.id }, `${item.title} · Work item analysis`)}>Analyze</button><button type="button" title="Remove work item" onClick={() => removeItem(item)}>×</button></div>)}<form className="project-item-create" onSubmit={(event) => createItem(event, project)}><select aria-label={`Work item type for ${project.name}`} value={itemDrafts[project.id]?.kind || 'task'} onChange={(event) => setItemDrafts((current) => ({ ...current, [project.id]: { ...current[project.id], kind: event.target.value } }))}>{['feature','task','bug','research'].map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select><input aria-label={`New work item title for ${project.name}`} placeholder="New work item title" maxLength={160} value={itemDrafts[project.id]?.title || ''} onChange={(event) => setItemDrafts((current) => ({ ...current, [project.id]: { ...current[project.id], title: event.target.value } }))} /><button type="submit" disabled={busy || !itemDrafts[project.id]?.title?.trim()}>Add</button></form></div>
               {workspaceErrors[project.id] && <p className="project-workspace-error" role="alert">{workspaceErrors[project.id]}</p>}
             </article>;
           }) : <div className="project-empty"><FolderOpen /><strong>No work projects yet</strong><p>Create one above to organize workspaces and sessions in one place.</p></div>}
@@ -138,6 +161,6 @@ export function RepositoriesView({ repositories, workProjects = [], hiddenWorkPr
       </section>
       {!!hiddenWorkProjectPaths.length && <section className="panel-block projects-panel"><header><div><span>Hidden folders</span><h2>{hiddenWorkProjectPaths.length} excluded from project navigation</h2></div></header><div className="projects-panel-body work-project-list">{hiddenWorkProjectPaths.map((folderPath) => <div key={folderPath} className="work-project-row"><code title={folderPath}>{folderPath}</code><button className="toolbar-button" type="button" disabled={busy} onClick={() => restoreFolder(folderPath)}>Show again</button></div>)}</div></section>}
     </div><aside className="projects-side"><section className="panel-block projects-panel"><header><div><span>Code sources</span><h2>Registered repositories · {repositories.length}</h2></div></header><div className="projects-panel-body"><p className="project-side-intro">Connect code repositories for managed runs. Workspaces above only organize sessions.</p><button className="secondary-button project-repo-picker" disabled={busy} onClick={async () => { setBusy(true); try { const result = await api.pickRepository(); if (result.path) { await api.addRepository(result.path); await reload(); } } catch (error) { setError(error.message); } finally { setBusy(false); } }}><FolderOpen /> Select repository folder</button><details className="project-repo-manual"><summary>Enter path manually</summary><form className="repo-form" onSubmit={submit}><label>Absolute path<input value={path} onChange={(event) => { setPath(event.target.value); setPathError(''); }} placeholder="/Users/me/code/my-repo" required aria-invalid={Boolean(pathError)} aria-describedby="repository-path-help" /><small id="repository-path-help" className={pathError ? 'form-error' : 'repo-field-hint'}>{pathError || 'Paste a local absolute path.'}</small></label><button className="primary-button" disabled={busy || !path.trim()}>{busy ? 'Inspecting…' : 'Register'}</button></form></details></div><div className="repo-grid">{repositories.map((repo) => <article key={repo.id}><FolderOpen /><div><h3>{repo.name}</h3><code title={repo.path}>{repo.path}</code></div><dl><dt>Branch</dt><dd>{repo.branch || 'Not reported'}</dd><dt>HEAD</dt><dd><code>{repo.headSha?.slice(0, 12) || 'Not available'}</code></dd></dl></article>)}</div></section></aside></div>
-    {folderDialog && <FolderBrowserDialog initialPath={folderDialog.initialPath} onClose={() => setFolderDialog(null)} onSelect={(folderPath) => folderDialog.kind === 'create' ? selectProjectFolder(folderPath) : selectWorkspace(folderDialog.project, folderPath)} />}
+    {folderDialog && <FolderBrowserDialog initialPath={folderDialog.initialPath} onClose={() => setFolderDialog(null)} onSelect={(folderPath) => folderDialog.kind === 'create' ? selectProjectFolder(folderPath) : folderDialog.kind === 'create-add' ? selectExtraProjectFolder(folderPath) : selectWorkspace(folderDialog.project, folderPath)} />}
   </PageShell>;
 }

@@ -1,6 +1,7 @@
 # Prototype Instructions
 
 Run the local server yourself and open the preview in the browser available to this environment. Do not give the user server-start instructions when you can run it.
+Use the existing local `.nostraxis` database for the user-facing preview. Keep seeded or temporary databases on separate test ports, and close those previews after verification so Projects and imported sessions remain visible in the main app.
 
 Before making substantial visual changes, use the Product Design plugin's `get-context` skill when the visual source is unclear or no longer matches the current goal. When the user gives durable prototype-specific design feedback, preferences, or decisions, record them in `AGENTS.md`.
 
@@ -39,3 +40,7 @@ The Context, Metrics, and Tools inspector must remain accessible at every suppor
 - A user-created work project can contain multiple workspace folders. Its card exposes a folder picker for adding another workspace, with absolute-path entry as a fallback; removing a workspace changes Nostraxis grouping only and never deletes source sessions.
 - Selecting a work project's workspace folders automatically includes existing sessions from each folder and its subfolders. The project card links directly to its filtered Sessions view, and project search finds any of its workspace folders.
 - The Projects screen keeps work-project creation and existing workspace management in a bounded primary column, with registered code repositories in a separate secondary column that stacks below on narrow screens. Avoid full-width project forms and visually active-looking disabled actions.
+- A user Project can contain multiple real folders and virtual Work Items. Several Projects may share or nest workspace folders; a session supported by the same reliable folder evidence appears in every matching Project. Sessions whose different working directories identify disjoint Projects remain in the global Inbox. Work Items are never inferred, and organization changes never modify provider logs.
+- Session Selector selections persist across search and filter changes until cleared. Project, Work Item, and transient selection analysis use the same metric aggregation rules, with unavailable provider values shown as unavailable and coverage stated explicitly.
+- The Sessions list opens in normal inspection mode. Show multi-session checkboxes and bulk actions only after the user enables selection mode; leaving that mode clears the selection.
+- Aggregate analysis shows a visible Copilot credit total whenever the dataset includes Copilot sessions. Sum credits only within the same provider unit, show coverage for missing values, and keep cost and token metrics visible alongside credits.

@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS work_projects(
 );
 CREATE TABLE IF NOT EXISTS work_project_folders(
   project_id TEXT NOT NULL REFERENCES work_projects(id) ON DELETE CASCADE,
-  folder_path TEXT NOT NULL UNIQUE,
+  folder_path TEXT NOT NULL,
   created_at TEXT NOT NULL,
   PRIMARY KEY(project_id, folder_path)
 );
@@ -65,6 +65,21 @@ CREATE TABLE IF NOT EXISTS hidden_work_project_paths(
 CREATE TABLE IF NOT EXISTS run_work_projects(
   run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
   project_id TEXT REFERENCES work_projects(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS work_items(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES work_projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  external_system TEXT,
+  external_key TEXT,
+  external_url TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS work_items_project ON work_items(project_id,created_at);
+CREATE TABLE IF NOT EXISTS run_work_items(
+  run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+  work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS events(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -195,6 +210,23 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path.join(dataDir, 'dashboard.sqlite'));
   db.exec(SCHEMA);
+  const folderTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='work_project_folders'").get()?.sql || '';
+  if (/folder_path\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(folderTableSql)) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`CREATE TABLE work_project_folders_new(
+        project_id TEXT NOT NULL REFERENCES work_projects(id) ON DELETE CASCADE,
+        folder_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(project_id, folder_path)
+      );
+      INSERT INTO work_project_folders_new(project_id,folder_path,created_at)
+        SELECT project_id,folder_path,created_at FROM work_project_folders;
+      DROP TABLE work_project_folders;
+      ALTER TABLE work_project_folders_new RENAME TO work_project_folders;`);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
   // Preserve projects created before one work project could own several folders.
   db.exec(`INSERT OR IGNORE INTO work_project_folders(project_id,folder_path,created_at)
     SELECT id,folder_path,created_at FROM work_projects WHERE folder_path IS NOT NULL`);
@@ -213,6 +245,7 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     getRun: db.prepare('SELECT * FROM runs WHERE id=?'),
     deleteRun: db.prepare('DELETE FROM runs WHERE id=?'),
     listEvents: db.prepare('SELECT * FROM events WHERE run_id=? ORDER BY timestamp, id'),
+    organizationEvents: db.prepare("SELECT type,data FROM events WHERE run_id=? AND type IN ('agent.workspace','agent.file_read','agent.file_modified')"),
     insertEvent: db.prepare('INSERT INTO events(run_id,timestamp,type,provider,data) VALUES (?,?,?,?,?)'),
     listRepositories: db.prepare('SELECT * FROM repositories ORDER BY name'),
     getRepository: db.prepare('SELECT * FROM repositories WHERE id=?'),
@@ -294,6 +327,9 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     eventsFor(runId) {
       return normalizeEvents(statements.listEvents.all(runId).map((row) => ({ id: row.id, runId: row.run_id, timestamp: row.timestamp, type: row.type, provider: row.provider, data: parse(row.data, {}) })));
     },
+    organizationEvidenceFor(runId) {
+      return statements.organizationEvents.all(runId).map((row) => ({ type: row.type, data: parse(row.data, {}) }));
+    },
     listRepositories: () => statements.listRepositories.all().map(repositoryFromRow),
     getRepository: (id) => repositoryFromRow(statements.getRepository.get(id)),
     listWorkProjects: () => db.prepare('SELECT id,name,created_at AS createdAt FROM work_projects ORDER BY name COLLATE NOCASE').all().map((project) => {
@@ -307,7 +343,9 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
       return { ...project, folderPath: folderPaths[0] || null, folderPaths };
     },
     saveWorkProject(project) {
-      db.prepare('INSERT INTO work_projects(id,name,folder_path,created_at) VALUES (?,?,?,?)').run(project.id, project.name, project.folderPath, project.createdAt);
+      // The legacy column remains for old databases, but its UNIQUE constraint
+      // must not stop two Projects from referencing the same real folder.
+      db.prepare('INSERT INTO work_projects(id,name,folder_path,created_at) VALUES (?,?,?,?)').run(project.id, project.name, null, project.createdAt);
       if (project.folderPath) db.prepare('INSERT INTO work_project_folders(project_id,folder_path,created_at) VALUES (?,?,?)').run(project.id, project.folderPath, project.createdAt);
       return store.getWorkProject(project.id);
     },
@@ -348,6 +386,18 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
       db.prepare('INSERT OR REPLACE INTO run_work_projects(run_id,project_id) VALUES (?,?)').run(runId, projectId);
     },
     clearRunWorkProject: (runId) => db.prepare('DELETE FROM run_work_projects WHERE run_id=?').run(runId),
+    listWorkItems: () => db.prepare('SELECT id,project_id AS projectId,kind,title,external_system AS externalSystem,external_key AS externalKey,external_url AS externalUrl,created_at AS createdAt FROM work_items ORDER BY created_at,id').all(),
+    getWorkItem: (id) => db.prepare('SELECT id,project_id AS projectId,kind,title,external_system AS externalSystem,external_key AS externalKey,external_url AS externalUrl,created_at AS createdAt FROM work_items WHERE id=?').get(id) || null,
+    saveWorkItem(item) {
+      db.prepare('INSERT INTO work_items(id,project_id,kind,title,external_system,external_key,external_url,created_at) VALUES (?,?,?,?,?,?,?,?)').run(item.id,item.projectId,item.kind,item.title,item.externalSystem || null,item.externalKey || null,item.externalUrl || null,item.createdAt);
+      return store.getWorkItem(item.id);
+    },
+    deleteWorkItem: (id) => db.prepare('DELETE FROM work_items WHERE id=?').run(id),
+    runWorkItemAssignments: () => db.prepare('SELECT run_id AS runId,work_item_id AS workItemId FROM run_work_items').all(),
+    setRunWorkItem(runId, workItemId) {
+      if (workItemId) db.prepare('INSERT OR REPLACE INTO run_work_items(run_id,work_item_id) VALUES (?,?)').run(runId,workItemId);
+      else db.prepare('DELETE FROM run_work_items WHERE run_id=?').run(runId);
+    },
     saveRepository(repo) {
       db.prepare(`INSERT INTO repositories(id,name,path,branch,head_sha,created_at)
         VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,

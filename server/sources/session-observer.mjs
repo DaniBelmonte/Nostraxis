@@ -112,6 +112,12 @@ function record(session, type, at, data = {}) {
   session.events.push({ type, timestamp: at, data });
 }
 
+function setWorkspace(session, cwd, at) {
+  if (!cwd || cwd === session.workspace) return;
+  session.workspace = cwd;
+  if (path.isAbsolute(cwd)) record(session, 'agent.workspace', at, { cwd, text: 'Working directory changed' });
+}
+
 function started(session, at) {
   session.status = 'running';
   session.endedAt = null;
@@ -172,12 +178,12 @@ export function consumeObservedEvent(session, event) {
   if (session.provider === 'codex') {
     if (event.type === 'session_meta') {
       session.nativeId = payload.id || payload.session_id || session.nativeId;
-      session.workspace = payload.cwd || session.workspace;
+      setWorkspace(session, payload.cwd, at);
       session.startedAt = toIsoTimestamp(payload.timestamp, at);
     }
     if (event.type === 'turn_context') {
       session.model = payload.model || session.model;
-      session.workspace = payload.cwd || session.workspace;
+      setWorkspace(session, payload.cwd, at);
     }
     if (event.type === 'token_usage_record') {
       const usage = usageFrom(payload.thread_token_usage);
@@ -233,7 +239,7 @@ export function consumeObservedEvent(session, event) {
 
   if (session.provider === 'claude') {
     session.nativeId ||= event.sessionId || '';
-    session.workspace = event.cwd || session.workspace;
+    setWorkspace(session, event.cwd, at);
     if (event.type === 'user' && !event.toolUseResult) {
       const value = typeof event.message?.content === 'string' ? event.message.content : event.message?.content;
       // A sidechain message is a subagent prompt and a meta message is injected
@@ -277,7 +283,7 @@ export function consumeObservedEvent(session, event) {
   if (session.provider === 'copilot') {
     if (event.type === 'session.start') {
       session.nativeId = payload.sessionId || session.nativeId;
-      session.workspace = payload.context?.cwd || session.workspace;
+      setWorkspace(session, payload.context?.cwd, at);
       session.model = payload.selectedModel || session.model;
       session.startedAt = toIsoTimestamp(payload.startTime, at);
     }

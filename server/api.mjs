@@ -7,6 +7,7 @@ import { createExperimentService } from './experiments/service.mjs';
 import { detectProviders } from './providers/index.mjs';
 import { buildAnalytics, compareRuns, metricDefinitions, matches } from './metrics/analytics.mjs';
 import { buildObservability } from './metrics/observability.mjs';
+import { buildSelectionAnalysis } from './metrics/selection-analysis.mjs';
 import { createExternalSessionService } from './sources/external-session-service.mjs';
 import { createProviderUsageService } from './sources/provider-usage.mjs';
 import { chooseRepositoryFolder, chooseSessionSourceFolder, chooseWorkProjectFolder } from './repositories/picker.mjs';
@@ -118,11 +119,11 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
         }
         if (req.method === 'GET' && route === '/api/dashboard') {
           await providersReady;
-          const { runs: allRuns, projects } = workProjects.resolve(runs.list());
+          const { runs: allRuns, projects, workItems } = workProjects.resolve(runs.list());
           const usage = await providerUsage.get();
           json(res, 200, {
             generatedAt: new Date().toISOString(), providers: providerCache,
-            repositories: repositories.list(), workProjects: projects, hiddenWorkProjectPaths: store.hiddenWorkProjectPaths(), runs: allRuns,
+            repositories: repositories.list(), workProjects: projects, workItems, hiddenWorkProjectPaths: store.hiddenWorkProjectPaths(), runs: allRuns,
             analytics: buildAnalytics(allRuns), experiments: experimentsEnabled ? experiments.list() : [],
             metricDefinitions, features: { experiments: experimentsEnabled },
             experimentCatalog: experimentsEnabled ? experiments.catalog() : null,
@@ -194,6 +195,47 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
           const count = workProjects.assignMany(runIds, projectId);
           bus.publish({ kind: 'work-projects' });
           json(res, 200, { assigned: count }); return true;
+        }
+        if (req.method === 'PUT' && route === '/api/organization/assign-runs') {
+          const { runIds, projectId, workItemId } = await readBody(req);
+          const count = workProjects.moveMany(runIds, projectId, workItemId);
+          bus.publish({ kind: 'organization' });
+          json(res, 200, { assigned: count }); return true;
+        }
+        if (req.method === 'POST' && route === '/api/work-items') {
+          const item = workProjects.createItem(await readBody(req));
+          bus.publish({ kind: 'work-items' });
+          json(res, 201, item); return true;
+        }
+        if (req.method === 'PUT' && route === '/api/work-items/assign-runs') {
+          const { runIds, workItemId } = await readBody(req);
+          const count = workProjects.assignItems(runIds, workItemId);
+          bus.publish({ kind: 'work-items' });
+          json(res, 200, { assigned: count }); return true;
+        }
+        const workItemId = matchId(route, '/api/work-items/');
+        if (req.method === 'DELETE' && workItemId) {
+          workProjects.removeItem(workItemId);
+          bus.publish({ kind: 'work-items' });
+          json(res, 200, { removed: true }); return true;
+        }
+        if (req.method === 'POST' && route === '/api/selection-analysis') {
+          const { runIds, projectId, workItemId: analyzedItemId } = await readBody(req);
+          const all = workProjects.resolve(runs.list()).runs;
+          let selected;
+          if (Array.isArray(runIds)) {
+            if (runIds.length > 2000 || runIds.some((id) => typeof id !== 'string')) throw new Error('Select up to 2000 sessions.');
+            const ids = new Set(runIds);
+            selected = all.filter((run) => ids.has(run.id));
+            if (selected.length !== ids.size) throw new Error('A selected session was not found.');
+          } else if (analyzedItemId) {
+            if (!store.getWorkItem(analyzedItemId)) throw new Error('Work item not found.');
+            selected = all.filter((run) => run.workItemId === analyzedItemId);
+          } else if (projectId) {
+            if (!workProjects.resolve().projects.some((project) => project.id === projectId)) throw new Error('Work project not found.');
+            selected = all.filter((run) => run.workProjectIds.includes(projectId));
+          } else throw new Error('Select sessions, a project, or a work item.');
+          json(res, 200, buildSelectionAnalysis(selected, store)); return true;
         }
         const folderProjectId = matchId(route, '/api/work-projects/', '/folders');
         if (folderProjectId && req.method === 'POST') {

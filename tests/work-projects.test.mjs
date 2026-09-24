@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { openDatabase } from '../server/persistence/database.mjs';
 import { createWorkProjectService } from '../server/work-projects/service.mjs';
 
@@ -47,7 +48,9 @@ test('manual project assignments survive session updates and removal leaves hist
     saveSession(store, 'strava-1', broadFolder);
     saveSession(store, 'other-1', broadFolder);
     const projects = createWorkProjectService(store);
-    const strava = projects.create({ name: 'Strava MCP' });
+    const workFolder = path.join(dataDir, 'Strava MCP');
+    await mkdir(workFolder);
+    const strava = projects.create({ name: 'Strava MCP', folderPath: workFolder });
     projects.assign('strava-1', strava.id);
     assert.equal(projects.resolve().runs.find((run) => run.id === 'strava-1').workProjectName, 'Strava MCP');
     assert.equal(projects.resolve().runs.find((run) => run.id === 'other-1').workProjectName, 'Daniel Belmonte Valero');
@@ -74,15 +77,16 @@ test('manual project assignments survive session updates and removal leaves hist
   }
 });
 
-test('a manual folder rule replaces its detected folder and covers child paths', async () => {
+test('a manual folder rule covers child paths while child folders remain discoverable', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'nostraxis-projects-'));
   const store = openDatabase(dataDir);
   try {
     const folderPath = path.join(dataDir, 'MilPlanner');
+    await mkdir(folderPath);
     saveSession(store, 'hermes-1', path.join(folderPath, 'subfolder'));
     const projects = createWorkProjectService(store);
     const workProject = projects.create({ name: 'MilPlanner work', folderPath });
-    assert.equal(projects.resolve().projects.length, 1);
+    assert.equal(projects.resolve().projects.length, 2);
     assert.equal(projects.resolve().runs[0].workProjectName, 'MilPlanner work');
     projects.remove(workProject.id);
     assert.equal(store.getRun('hermes-1').repositoryPath, path.join(folderPath, 'subfolder'));
@@ -93,12 +97,43 @@ test('a manual folder rule replaces its detected folder and covers child paths',
   }
 });
 
+test('overlapping Projects share matching sessions while manual moves remain explicit', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'nostraxis-shared-projects-'));
+  const parent = path.join(dataDir, 'GitHub');
+  const child = path.join(parent, 'eci-ios-rebirth');
+  await mkdir(parent); await mkdir(child);
+  const store = openDatabase(dataDir);
+  try {
+    saveSession(store, 'child-session', path.join(child, 'Sources'));
+    saveSession(store, 'parent-session', path.join(parent, 'other'));
+    const projects = createWorkProjectService(store);
+    const broad = projects.create({ name: 'GitHub', folderPath: parent });
+    const specific = projects.create({ name: 'eci-ios-rebirth', folderPath: child });
+    let resolved = projects.resolve();
+    assert.deepEqual(new Set(resolved.runs.find((run) => run.id === 'child-session').workProjectIds), new Set([broad.id, specific.id]));
+    assert.deepEqual(resolved.runs.find((run) => run.id === 'parent-session').workProjectIds, [broad.id]);
+    assert.equal(resolved.projects.find((project) => project.id === broad.id).sessionCount, 2);
+    assert.equal(resolved.projects.find((project) => project.id === specific.id).sessionCount, 1);
+    const duplicate = projects.create({ name: 'Another child view', folderPath: child });
+    resolved = projects.resolve();
+    assert.deepEqual(new Set(resolved.runs.find((run) => run.id === 'child-session').workProjectIds), new Set([broad.id, specific.id, duplicate.id]));
+    const item = projects.createItem({ projectId: specific.id, title: 'Feature work', kind: 'feature' });
+    projects.assignItems(['child-session'], item.id);
+    assert.equal(projects.resolve().runs.find((run) => run.id === 'child-session').workItemId, item.id);
+    projects.assign('child-session', broad.id);
+    assert.deepEqual(projects.resolve().runs.find((run) => run.id === 'child-session').workProjectIds, [broad.id]);
+    projects.assign('child-session', 'auto');
+    assert.equal(projects.resolve().runs.find((run) => run.id === 'child-session').workProjectIds.length, 3);
+  } finally { store.close(); await rm(dataDir, { recursive: true, force: true }); }
+});
+
 test('a work project can own several workspaces without changing source sessions', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'nostraxis-projects-'));
   let store = openDatabase(dataDir);
   try {
     const first = path.join(dataDir, 'MilPlanner');
     const second = path.join(dataDir, 'Strava MCP');
+    await mkdir(first); await mkdir(second);
     saveSession(store, 'meal-1', path.join(first, 'app'));
     saveSession(store, 'strava-1', path.join(second, 'mcp'));
     const projects = createWorkProjectService(store);
@@ -149,4 +184,27 @@ test('legacy work-project folder rules migrate to the workspace collection', asy
     store.close();
     await rm(dataDir, { recursive: true, force: true });
   }
+});
+
+test('an existing database migrates to allow the same workspace in several projects', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'nostraxis-overlap-migration-'));
+  const folderPath = path.join(dataDir, 'eci-ios-rebirth');
+  await mkdir(folderPath);
+  const legacy = new DatabaseSync(path.join(dataDir, 'dashboard.sqlite'));
+  legacy.exec(`CREATE TABLE work_projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,folder_path TEXT UNIQUE,created_at TEXT NOT NULL);
+    CREATE TABLE work_project_folders(project_id TEXT NOT NULL REFERENCES work_projects(id) ON DELETE CASCADE,folder_path TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL,PRIMARY KEY(project_id,folder_path));`);
+  legacy.prepare('INSERT INTO work_projects VALUES (?,?,?,?)').run('work:old', 'GitHub', folderPath, '2026-09-23T10:00:00Z');
+  legacy.prepare('INSERT INTO work_project_folders VALUES (?,?,?)').run('work:old', folderPath, '2026-09-23T10:00:00Z');
+  legacy.close();
+  let store = openDatabase(dataDir);
+  try {
+    const projects = createWorkProjectService(store);
+    const second = projects.create({ name: 'eci-ios-rebirth', folderPath });
+    assert.deepEqual(store.getWorkProject('work:old').folderPaths, [folderPath]);
+    assert.deepEqual(store.getWorkProject(second.id).folderPaths, [folderPath]);
+    store.close();
+    store = openDatabase(dataDir);
+    assert.equal(store.listWorkProjects().length, 2);
+    assert.deepEqual(store.getWorkProject(second.id).folderPaths, [folderPath]);
+  } finally { store.close(); await rm(dataDir, { recursive: true, force: true }); }
 });
