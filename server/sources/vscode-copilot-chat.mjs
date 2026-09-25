@@ -132,6 +132,56 @@ function responseTimestamp(request, fallback) {
   return isoDate(request?.responseTimestamp, requestTimestamp(request, fallback));
 }
 
+function invocationPaths(item) {
+  const uris = { ...item.invocationMessage?.uris, ...item.pastTenseMessage?.uris };
+  return [...new Set(Object.entries(uris).map(([uri, value]) => {
+    if (value?.scheme === 'file' && typeof value.path === 'string' && path.isAbsolute(value.path)) return value.path;
+    return localPathFromUri(uri);
+  }).filter(Boolean))];
+}
+
+function toolEvents(request, fallback) {
+  const response = Array.isArray(request.response) ? request.response : [];
+  // A journal can retain several states of the same invocation. Its last
+  // serialized state is the best available record of that one call.
+  const calls = new Map();
+  response.forEach((item, index) => {
+    if (item?.kind !== 'toolInvocationSerialized') return;
+    calls.set(item.toolCallId || `response-${index}`, item);
+  });
+  const events = [];
+  for (const [toolCallId, item] of calls) {
+    const tool = String(item.toolId || 'tool');
+    const paths = invocationPaths(item);
+    const message = short(item.pastTenseMessage?.value || item.invocationMessage?.value || item.generatedTitle || tool, 1000);
+    const command = item.toolSpecificData?.kind === 'terminal'
+      ? item.toolSpecificData.commandLine?.original || item.toolSpecificData.commandLine?.forDisplay || '' : '';
+    const timestamp = isoDate(item.toolSpecificData?.terminalCommandState?.timestamp,
+      responseTimestamp(request, fallback));
+    const base = { tool, toolCallId, text: command || message, source: 'vscode-chat' };
+    if (command) {
+      events.push({ type: 'agent.command_started', timestamp, data: { ...base, command,
+        exitCode: item.toolSpecificData?.terminalCommandState?.exitCode ?? null } });
+      continue;
+    }
+    const actionMessage = item.invocationMessage?.value || item.pastTenseMessage?.value || '';
+    const isRead = tool === 'copilot_readFile' || (tool === 'copilot_memory' && /^read(?:ing)?\b/i.test(actionMessage));
+    const isWrite = ['copilot_createFile', 'copilot_replaceString', 'copilot_multiReplaceString'].includes(tool)
+      || (tool === 'copilot_memory' && /^(?:updat|writ|creat)/i.test(actionMessage));
+    if ((isRead || isWrite) && paths.length) {
+      // One invocation may modify several files. Count the tool once while
+      // retaining an individual file event for every affected path.
+      if (paths.length > 1) events.push({ type: 'agent.tool_called', timestamp, data: base });
+      for (const filePath of paths) events.push({
+        type: isWrite ? 'agent.file_modified' : 'agent.file_read', timestamp,
+        data: { ...base, tool: paths.length === 1 ? tool : null,
+          path: filePath, text: `${tool} · ${filePath}` },
+      });
+    } else events.push({ type: 'agent.tool_called', timestamp, data: base });
+  }
+  return events;
+}
+
 export async function buildVscodeCopilotSnapshot(document, filename, fallbackTimestamp = new Date().toISOString()) {
   if (!isVscodeCopilotChat(document)) return null;
   const documentIsCopilot = /github copilot/i.test(document.responderUsername || '');
@@ -154,6 +204,7 @@ export async function buildVscodeCopilotSnapshot(document, filename, fallbackTim
     const inputAt = requestTimestamp(request, startedAt);
     const outputAt = responseTimestamp(request, inputAt);
     if (prompt) events.push({ type: 'agent.input', timestamp: inputAt, data: { text: prompt, source: 'vscode-chat' } });
+    events.push(...toolEvents(request, outputAt));
     if (response) events.push({ type: 'agent.output', timestamp: outputAt, data: { text: response, source: 'vscode-chat' } });
   }
   if (usage) events.push({ type: 'agent.usage', timestamp: updatedAt, data: { text: 'VS Code Copilot Chat usage imported', usage } });

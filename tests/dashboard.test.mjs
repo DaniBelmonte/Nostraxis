@@ -361,6 +361,20 @@ test('VS Code Copilot Chat journals are reconstructed and imported with local wo
     { kind: 2, k: ['requests', 0, 'response'], v: [
       { kind: 'thinking', value: 'Hidden reasoning must not be imported.' },
       { value: 'Visible VS Code Copilot response.' },
+      { kind: 'toolInvocationSerialized', toolCallId: 'read-1', toolId: 'copilot_readFile',
+        invocationMessage: { value: 'Reading file', uris: { [`file://${repositoryPath}/src/input.swift`]: { scheme: 'file', path: `${repositoryPath}/src/input.swift` } } } },
+      { kind: 'toolInvocationSerialized', toolCallId: 'read-1', toolId: 'copilot_readFile', isComplete: true,
+        pastTenseMessage: { value: 'Read file', uris: { [`file://${repositoryPath}/src/input.swift`]: { scheme: 'file', path: `${repositoryPath}/src/input.swift` } } } },
+      { kind: 'toolInvocationSerialized', toolCallId: 'write-1', toolId: 'copilot_multiReplaceString',
+        invocationMessage: { value: 'Replacing files', uris: {
+          [`file://${repositoryPath}/src/input.swift`]: { scheme: 'file', path: `${repositoryPath}/src/input.swift` },
+          [`file://${repositoryPath}/src/output.swift`]: { scheme: 'file', path: `${repositoryPath}/src/output.swift` },
+        } } },
+      { kind: 'toolInvocationSerialized', toolCallId: 'terminal-1', toolId: 'run_in_terminal',
+        invocationMessage: { value: 'Running command' }, toolSpecificData: { kind: 'terminal',
+          commandLine: { original: 'swift test' }, terminalCommandState: { timestamp: timestamp + 1000, exitCode: 0 } } },
+      { kind: 'toolInvocationSerialized', toolCallId: 'list-1', toolId: 'copilot_listDirectory',
+        invocationMessage: { value: 'Listing directory', uris: { [`file://${repositoryPath}/src`]: { scheme: 'file', path: `${repositoryPath}/src` } } } },
     ] },
   ];
   const filename = path.join(chatRoot, 'vscode-chat-1.jsonl');
@@ -368,7 +382,7 @@ test('VS Code Copilot Chat journals are reconstructed and imported with local wo
 
   const replayed = replayVscodeChat(records);
   assert.equal(replayed.requests[0].promptTokens, 600);
-  assert.equal(replayed.requests[0].response.length, 2);
+  assert.equal(replayed.requests[0].response.length, 7);
   const pendingDocument = { ...replayed, pendingRequests: [{ requestId: 'request-1' }] };
   const recentPending = await buildVscodeCopilotSnapshot(pendingDocument, filename, new Date(timestamp + 60_000).toISOString());
   const stalePending = await buildVscodeCopilotSnapshot(pendingDocument, filename, new Date(timestamp + 10 * 60_000).toISOString());
@@ -407,6 +421,22 @@ test('VS Code Copilot Chat journals are reconstructed and imported with local wo
     });
     assert.equal(run.contextSnapshot.source, 'vscode-copilot-chat');
     assert.equal(result.sources[0].count, 1);
+    const events = store.eventsFor(run.id);
+    assert.equal(events.filter((event) => event.type === 'agent.file_read').length, 1);
+    assert.deepEqual(events.filter((event) => event.type === 'agent.file_modified').map((event) => event.data.path).sort(),
+      [`${repositoryPath}/src/input.swift`, `${repositoryPath}/src/output.swift`]);
+    assert.equal(events.filter((event) => event.type === 'agent.command_started')[0].data.command, 'swift test');
+    assert.equal(events.filter((event) => event.type === 'agent.tool_called').length, 2);
+    assert.equal(events.filter((event) => event.data.tool === 'copilot_readFile').length, 1);
+    await service.sync();
+    assert.equal(store.eventsFor(run.id).length, events.length);
+    const laterCall = { kind: 'toolInvocationSerialized', toolCallId: 'read-2', toolId: 'copilot_readFile',
+      invocationMessage: { value: 'Reading another file', uris: {
+        [`file://${repositoryPath}/src/later.swift`]: { scheme: 'file', path: `${repositoryPath}/src/later.swift` },
+      } } };
+    await writeFile(filename, [...records, { kind: 2, k: ['requests', 0, 'response'], v: [laterCall] }].map(JSON.stringify).join('\n'));
+    await service.sync();
+    assert.equal(store.eventsFor(run.id).filter((event) => event.type === 'agent.file_read').length, 2);
   } finally {
     await service.close();
     store.close();
