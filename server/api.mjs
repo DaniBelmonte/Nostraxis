@@ -10,6 +10,7 @@ import { createExternalSessionService } from './sources/external-session-service
 import { createProviderUsageService } from './sources/provider-usage.mjs';
 import { chooseRepositoryFolder } from './repositories/picker.mjs';
 import { buildRunJsonl, runExportFilename } from './exports/run-jsonl.mjs';
+import { PRICING_SETTING, environmentPricedModels, normalizePricing, savedPricing } from './metrics/cost.mjs';
 
 const json = (res, status, value) => {
   const body = JSON.stringify(value);
@@ -73,6 +74,8 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
     getSources: () => externalSessions.status().sources,
   });
 
+  const pricingSettings = () => ({ ...savedPricing(store), environmentModels: environmentPricedModels() });
+
   return {
     async handle(req, res) {
       const url = new URL(req.url, 'http://localhost');
@@ -102,8 +105,17 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
             sessionSources: externalSessions.status().sources,
             externalSessionCount: externalSessions.status().imported,
             providerUsage: usage,
+            pricing: pricingSettings(),
           });
           return true;
+        }
+        if (req.method === 'GET' && route === '/api/settings/pricing') {
+          json(res, 200, pricingSettings()); return true;
+        }
+        if (req.method === 'PUT' && route === '/api/settings/pricing') {
+          store.saveSetting(PRICING_SETTING, normalizePricing(await readBody(req)));
+          bus.publish({ kind: 'pricing' });
+          json(res, 200, pricingSettings()); return true;
         }
         if (req.method === 'POST' && route === '/api/provider-usage') {
           await providersReady;

@@ -1,17 +1,88 @@
-function configuredPricing() {
-  try { return JSON.parse(process.env.NOSTRAXIS_PRICING_JSON || '{}'); }
+// Prices are applied when runs are read, never written into the stored usage,
+// so a price changed in Settings re-prices every session. A cost the provider
+// reported always wins over a configured price.
+export const PRICING_SETTING = 'pricing';
+const CONFIGURED = new Set(['configured-estimate', 'configured-credits']);
+const RATE_FIELDS = ['inputPerMillion', 'cachedInputPerMillion', 'outputPerMillion'];
+const CREDIT_FIELDS = { 'AI credits': 'aiCreditUsd', 'premium requests': 'premiumRequestUsd' };
+
+const rate = (value, label) => {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${label} must be a non-negative number.`);
+  return number;
+};
+
+export function normalizePricing(value = {}) {
+  const models = {};
+  for (const [key, rates] of Object.entries(value?.models || {})) {
+    const model = String(key).trim();
+    if (!model) continue;
+    if (model.length > 200) throw new Error('Model ids must have at most 200 characters.');
+    const entry = Object.fromEntries(RATE_FIELDS.map((field) => [field, rate(rates?.[field], `${model} ${field}`)]));
+    if (entry.inputPerMillion == null && entry.outputPerMillion == null && entry.cachedInputPerMillion == null) continue;
+    if (entry.inputPerMillion == null || entry.outputPerMillion == null) throw new Error(`${model} needs both input and output prices.`);
+    models[model] = entry;
+  }
+  return { aiCreditUsd: rate(value?.aiCreditUsd, 'AI credit price'), premiumRequestUsd: rate(value?.premiumRequestUsd, 'Premium request price'), models };
+}
+
+function environmentModels() {
+  try { return normalizePricing({ models: JSON.parse(process.env.NOSTRAXIS_PRICING_JSON || '{}') }).models; }
   catch { return {}; }
 }
 
-export function withEstimatedCost(usage, model) {
-  if (!usage || Number.isFinite(usage.cost)) return usage ? { ...usage, costSource: usage.cost != null ? 'provider' : null } : null;
-  const rates = configuredPricing()[model];
-  if (!rates || !Number.isFinite(usage.input) || !Number.isFinite(usage.output)) return { ...usage, cost: null, costSource: null };
-  const uncached = Math.max(0, usage.input - (usage.cached || 0));
+export const savedPricing = (store) => normalizePricing(store.setting(PRICING_SETTING, {}) || {});
+
+// Settings override the environment table model by model.
+export function pricingFrom(store) {
+  const saved = savedPricing(store);
+  return { ...saved, models: { ...environmentModels(), ...saved.models } };
+}
+
+export const environmentPricedModels = () => Object.keys(environmentModels());
+
+const ratesFor = (models, model) => models[model]
+  || Object.entries(models).find(([id]) => id.toLowerCase() === String(model || '').toLowerCase())?.[1]
+  || null;
+
+const creditRate = (usage, pricing) => Number.isFinite(usage?.credits) ? pricing[CREDIT_FIELDS[usage.creditUnit]] ?? null : null;
+
+// Import boundary: only a provider-reported cost is kept in storage.
+export function withReportedCost(usage) {
+  if (!usage) return null;
+  const reported = Number.isFinite(usage.cost) && !CONFIGURED.has(usage.costSource);
+  return { ...usage, cost: reported ? usage.cost : null, costSource: reported ? usage.costSource || 'provider' : null };
+}
+
+// `basis` keeps every measurement of one run priced the same way, so a
+// Copilot chart never switches between credits and tokens mid-session.
+export function priceUsage(usage, model, pricing, basis = pricingBasis(usage, pricing)) {
+  if (!usage) return usage;
+  if (Number.isFinite(usage.cost) && !CONFIGURED.has(usage.costSource)) return usage;
+  const stale = CONFIGURED.has(usage.costSource) ? { ...usage, cost: null, costSource: null } : usage;
+  if (basis === 'credits') {
+    const value = creditRate(usage, pricing);
+    return value == null ? stale : { ...usage, cost: Number((usage.credits * value).toFixed(8)), costSource: 'configured-credits' };
+  }
+  const rates = ratesFor(pricing.models, model);
+  if (!rates || !Number.isFinite(usage.input) || !Number.isFinite(usage.output)) return stale;
+  const cached = Math.min(usage.input, usage.cached || 0);
   const value = (
-    uncached * rates.inputPerMillion
-    + (usage.cached || 0) * (rates.cachedInputPerMillion ?? rates.inputPerMillion)
+    (usage.input - cached) * rates.inputPerMillion
+    + cached * (rates.cachedInputPerMillion ?? rates.inputPerMillion)
     + usage.output * rates.outputPerMillion
   ) / 1_000_000;
   return { ...usage, cost: Number(value.toFixed(8)), costSource: 'configured-estimate' };
+}
+
+export const pricingBasis = (usage, pricing) => creditRate(usage, pricing) != null ? 'credits' : 'tokens';
+
+export const priceRun = (run, pricing) => run?.usage ? { ...run, usage: priceUsage(run.usage, run.model, pricing) } : run;
+
+export function priceEvents(events, run, pricing) {
+  const basis = pricingBasis(run?.usage, pricing);
+  return events.map((event) => event.data?.usage
+    ? { ...event, data: { ...event.data, usage: priceUsage(event.data.usage, run?.model, pricing, basis) } }
+    : event);
 }
