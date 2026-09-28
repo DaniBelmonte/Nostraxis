@@ -487,9 +487,15 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .pricing-row { display: grid; grid-template-columns: minmax(180px, 1.6fr) repeat(3, minmax(90px, 1fr)) 30px; gap: 8px; align-items: center; min-height: 44px; padding: 6px 12px; border-top: 1px solid var(--line-soft); font-size: 9px; }
 .pricing-head { min-height: 30px; border-top: 0; background: #091923; color: #8099ab; }
 .pricing-model { min-width: 0; display: grid; gap: 3px; }.pricing-model code { color: #54baff; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.pricing-model small { color: #7f98aa; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pricing-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 12px; border-top: 1px solid var(--line); }
-.pricing-footer button:disabled { opacity: .5; cursor: not-allowed; }
-.pricing-add { flex: 0 1 240px; min-width: 160px; }.pricing-footer > small { flex: 1 1 200px; }.pricing-footer .primary-button { justify-self: auto; height: 30px; }
+.pricing-add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 12px; border-top: 1px solid var(--line-soft); }
+.pricing-add-row button:disabled, .pricing-footer button:disabled { opacity: .5; cursor: not-allowed; }
+.pricing-add { flex: 0 1 240px; min-width: 160px; }
+/* The save bar follows the panel while it scrolls, so Save is always in reach. */
+.pricing-footer { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 10px 12px; border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; background: #0d1c27; box-shadow: 0 -10px 18px #0b192499; }
+.pricing-footer .primary-button { justify-self: auto; height: 30px; }
+.pricing-save-state { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; margin: 0; color: #6f8a9d; font-size: 10px; }.pricing-save-state svg { flex: none; width: 14px; height: 14px; }
+.pricing-footer.dirty { border-top-color: #8a6a2c; }.pricing-footer.dirty .pricing-save-state { color: #efc669; }
+.pricing-footer.saved .pricing-save-state { color: #70c5ac; }.pricing-footer.error .pricing-save-state { color: #f8a269; }
 @media (max-width: 720px) {
   .pricing-credits { grid-template-columns: minmax(0, 1fr); }
   .pricing-head { display: none; }
@@ -498,8 +504,8 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
   .pricing-row > span[data-label] { display: grid; gap: 4px; }
   .pricing-row > span[data-label]::before { content: attr(data-label); color: #8099ab; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pricing-row > span:last-child { align-self: end; }
-  .pricing-footer .pricing-add, .pricing-footer > small { flex-basis: 100%; }
-  .pricing-footer .secondary-button, .pricing-plan .secondary-button { max-width: none; }
+  .pricing-add-row .pricing-add, .pricing-save-state { flex-basis: 100%; }
+  .pricing-footer .secondary-button, .pricing-add-row .secondary-button, .pricing-plan .secondary-button { max-width: none; }
   .pricing-footer .primary-button { flex: 1; }
 }
 .architecture-note { margin-top: 12px; border: 1px solid #285b72; background: #0b2634; padding: 16px; display: grid; grid-template-columns: 30px 1fr; gap: 10px; }.architecture-note svg { color: var(--blue); width: 24px; }.architecture-note h2 { font-size: 13px; margin: 0 0 6px; }.architecture-note p { margin: 0; color: #91aaba; font-size: 10px; line-height: 1.6; }

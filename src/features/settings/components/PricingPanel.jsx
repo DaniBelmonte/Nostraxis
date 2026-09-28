@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, X } from '@phosphor-icons/react';
+import { CheckCircle, Plus, WarningCircle, X } from '@phosphor-icons/react';
 import { api } from '../../../shared/api/client';
 import { PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 
@@ -77,10 +77,16 @@ export function PricingPanel({ pricing, runs, providerUsage, reload }) {
     try {
       await api.savePricing(draft);
       await reload();
-      setStatus({ error: '', message: 'Prices saved · every session is re-priced' });
+      setStatus({ error: '', message: `Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · every session is re-priced` });
     } catch (reason) { setStatus({ error: reason.message, message: '' }); }
     finally { setBusy(false); }
   };
+  // The save state stays visible: unsaved edits, a failure or the last save.
+  const state = status.error ? ['error', <WarningCircle key="icon" />, status.error]
+    : busy ? ['pending', null, 'Saving…']
+    : dirty ? ['dirty', <WarningCircle key="icon" />, 'Unsaved changes · press Save prices to apply them']
+    : status.message ? ['saved', <CheckCircle key="icon" weight="fill" />, status.message]
+    : ['idle', null, environmentModels.length ? `${environmentModels.length} models priced by NOSTRAXIS_PRICING_JSON; a price saved here overrides it.` : 'Empty prices stay unreported; nothing is inferred as zero.'];
   return <section className="panel-block pricing-panel">
     <header><div><span>Pricing</span><h2>Cost equivalents · USD</h2></div><small>A cost reported by the provider always takes precedence.</small></header>
     <form onSubmit={submit}>
@@ -100,10 +106,12 @@ export function PricingPanel({ pricing, runs, providerUsage, reload }) {
         </div>)}
         {!rows.length && <p className="table-empty">No models observed yet. Add a model id to price it before its first session.</p>}
       </div>
-      <footer className="pricing-footer">
+      <div className="pricing-add-row">
         <label className="pricing-add"><span className="sr-only">Model id</span><input value={newModel} onChange={(event) => setNewModel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addModel(); } }} placeholder="Add model id, e.g. gpt-5" maxLength={200} /></label>
         <button type="button" className="secondary-button" onClick={addModel} disabled={!newModel.trim()}><Plus /> Add model</button>
-        <small className={status.error ? 'form-error' : 'repo-field-hint'} aria-live="polite">{status.error || status.message || (environmentModels.length ? `${environmentModels.length} models priced by NOSTRAXIS_PRICING_JSON; a price saved here overrides it.` : 'Empty prices stay unreported; nothing is inferred as zero.')}</small>
+      </div>
+      <footer className={`pricing-footer ${state[0]}`}>
+        <p className="pricing-save-state" role="status" aria-live="polite">{state[1]}<span>{state[2]}</span></p>
         <button type="button" className="secondary-button" onClick={() => { setDraft(saved); setStatus({ error: '', message: '' }); }} disabled={!dirty || busy}>Discard</button>
         <button type="submit" className="primary-button" disabled={!dirty || busy}>{busy ? 'Saving…' : 'Save prices'}</button>
       </footer>
