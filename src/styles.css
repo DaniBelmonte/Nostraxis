@@ -474,7 +474,11 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .pricing-panel input { min-width: 0; width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: #091720; border: 1px solid #395063; border-radius: 3px; font: 10px 'JetBrains Mono'; color-scheme: dark; }
 .pricing-panel input::placeholder { color: #5f7a8d; }
 .pricing-credits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; border-bottom: 1px solid var(--line-soft); }
+.pricing-basis { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px; }
+.pricing-basis > div:first-child { display: grid; gap: 3px; }.pricing-basis strong { color: #e2edf4; font-size: 11px; }.pricing-basis small { color: #7890a3; font-size: 9px; }
+.pricing-basis .group-mode-toggle button { height: 30px; padding: 0 12px; font-size: 10px; }
 .pricing-plan { min-width: 0; margin: 0; border: 1px solid #304858; background: #091923; padding: 10px 12px 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; align-content: start; }
+.pricing-plan.inactive { opacity: .55; }
 .pricing-plan legend { padding: 0 4px; color: #e2edf4; font-size: 11px; font-weight: 600; }
 .pricing-credits label { display: grid; gap: 5px; color: #b9cad6; font-size: 10px; }.pricing-credits label small { color: #7890a3; font-size: 9px; }
 .pricing-derived { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 6px; margin: 0; color: #7f98aa; font-size: 9px; }.pricing-derived strong { color: #70c5ac; font: 12px 'JetBrains Mono'; }

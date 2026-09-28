@@ -4,6 +4,7 @@
 export const PRICING_SETTING = 'pricing';
 const CONFIGURED = new Set(['configured-estimate', 'configured-credits']);
 const RATE_FIELDS = ['inputPerMillion', 'cachedInputPerMillion', 'outputPerMillion'];
+const COPILOT_BASES = new Set(['credits', 'tokens']);
 const CREDIT_FIELDS = { 'AI credits': 'aiCreditUsd', 'premium requests': 'premiumRequestUsd' };
 
 const rate = (value, label) => {
@@ -39,7 +40,8 @@ export function normalizePricing(value = {}) {
   }
   const aiCreditPlan = plan(value?.aiCreditPlan, 'AI credits');
   const premiumRequestPlan = plan(value?.premiumRequestPlan, 'premium requests');
-  return { aiCreditPlan, premiumRequestPlan, aiCreditUsd: unitPrice(aiCreditPlan), premiumRequestUsd: unitPrice(premiumRequestPlan), models };
+  if (value?.copilotBasis != null && !COPILOT_BASES.has(value.copilotBasis)) throw new Error('Copilot cost basis must be credits or tokens.');
+  return { copilotBasis: value?.copilotBasis || 'credits', aiCreditPlan, premiumRequestPlan, aiCreditUsd: unitPrice(aiCreditPlan), premiumRequestUsd: unitPrice(premiumRequestPlan), models };
 }
 
 function environmentModels() {
@@ -70,9 +72,10 @@ export function withReportedCost(usage) {
   return { ...usage, cost: reported ? usage.cost : null, costSource: reported ? usage.costSource || 'provider' : null };
 }
 
-// `basis` keeps every measurement of one run priced the same way, so a
-// Copilot chart never switches between credits and tokens mid-session.
-export function priceUsage(usage, model, pricing, basis = pricingBasis(usage, pricing)) {
+// Copilot bills either through the subscription credits or, behind them, the
+// tokens of the model it routes to. Settings picks one basis for every Copilot
+// run and it is never mixed or used as a fallback for the other.
+export function priceUsage(usage, model, pricing, basis = 'tokens') {
   if (!usage) return usage;
   if (Number.isFinite(usage.cost) && !CONFIGURED.has(usage.costSource)) return usage;
   const stale = CONFIGURED.has(usage.costSource) ? { ...usage, cost: null, costSource: null } : usage;
@@ -91,12 +94,12 @@ export function priceUsage(usage, model, pricing, basis = pricingBasis(usage, pr
   return { ...usage, cost: Number(value.toFixed(8)), costSource: 'configured-estimate' };
 }
 
-export const pricingBasis = (usage, pricing) => creditRate(usage, pricing) != null ? 'credits' : 'tokens';
+export const pricingBasis = (run, pricing) => run?.provider === 'copilot' ? pricing.copilotBasis || 'credits' : 'tokens';
 
-export const priceRun = (run, pricing) => run?.usage ? { ...run, usage: priceUsage(run.usage, run.model, pricing) } : run;
+export const priceRun = (run, pricing) => run?.usage ? { ...run, usage: priceUsage(run.usage, run.model, pricing, pricingBasis(run, pricing)) } : run;
 
 export function priceEvents(events, run, pricing) {
-  const basis = pricingBasis(run?.usage, pricing);
+  const basis = pricingBasis(run, pricing);
   return events.map((event) => event.data?.usage
     ? { ...event, data: { ...event.data, usage: priceUsage(event.data.usage, run?.model, pricing, basis) } }
     : event);

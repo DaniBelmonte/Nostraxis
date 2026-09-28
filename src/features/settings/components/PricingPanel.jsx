@@ -10,7 +10,9 @@ const PLANS = [
 ];
 const text = (value) => Number.isFinite(value) ? String(value) : '';
 const usdPerUnit = (value) => `$${value.toLocaleString('en-GB', { maximumFractionDigits: 6 })}`;
+const BASES = [['credits', 'Subscription credits'], ['tokens', 'Model token prices']];
 const draftFrom = (pricing) => ({
+  copilotBasis: pricing?.copilotBasis || 'credits',
   ...Object.fromEntries(PLANS.map(([key]) => [key, { usd: text(pricing?.[key]?.usd), credits: text(pricing?.[key]?.credits) }])),
   models: Object.fromEntries(Object.entries(pricing?.models || {}).map(([model, rates]) => [model, Object.fromEntries(RATE_FIELDS.map(([field]) => [field, text(rates[field])]))])),
 });
@@ -34,11 +36,11 @@ function RateInput({ label, value, onChange, placeholder = 'Not set' }) {
 }
 
 // The price per credit is derived, never typed: plan price / credits included.
-function CreditPlan({ unit, title, single, value, quota, onChange }) {
+function CreditPlan({ unit, title, single, value, quota, inactive, onChange }) {
   const usd = Number(value.usd);
   const credits = Number(value.credits);
   const derived = value.usd !== '' && value.credits !== '' && Number.isFinite(usd) && Number.isFinite(credits) && credits > 0 ? usd / credits : null;
-  return <fieldset className="pricing-plan">
+  return <fieldset className={`pricing-plan ${inactive ? 'inactive' : ''}`}>
     <legend>{title}</legend>
     <label>Subscription price<small>USD for the plan</small><RateInput label={`${title} price in USD`} value={value.usd} onChange={(next) => onChange({ ...value, usd: next })} /></label>
     <label>Credits included<small>{`${unit} in the plan`}</small><RateInput label={`${unit} included in the plan`} value={value.credits} placeholder={Number.isFinite(quota) ? String(quota) : 'Not set'} onChange={(next) => onChange({ ...value, credits: next })} /></label>
@@ -83,8 +85,11 @@ export function PricingPanel({ pricing, runs, providerUsage, reload }) {
     <header><div><span>Pricing</span><h2>Cost equivalents · USD</h2></div><small>A cost reported by the provider always takes precedence.</small></header>
     <form onSubmit={submit}>
       <div className="pricing-credits">
-        {PLANS.map(([key, unit, title, single]) => <CreditPlan key={key} unit={unit} title={title} single={single} value={draft[key]} quota={quotaFor(unit)} onChange={(value) => setDraft((current) => ({ ...current, [key]: value }))} />)}
-        <p>Copilot sessions that report credits are priced in their own unit; AI credits and premium requests are never mixed. Sessions without credits fall back to the model prices below.</p>
+        <div className="pricing-basis" role="radiogroup" aria-label="Copilot cost basis"><div><strong>Copilot sessions priced by</strong><small>One basis for every Copilot session; the other is never used as a fallback.</small></div><div className="group-mode-toggle">{BASES.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={draft.copilotBasis === id} className={draft.copilotBasis === id ? 'active' : ''} onClick={() => setDraft((current) => ({ ...current, copilotBasis: id }))}>{label}</button>)}</div></div>
+        {PLANS.map(([key, unit, title, single]) => <CreditPlan key={key} unit={unit} title={title} single={single} value={draft[key]} quota={quotaFor(unit)} inactive={draft.copilotBasis !== 'credits'} onChange={(value) => setDraft((current) => ({ ...current, [key]: value }))} />)}
+        <p>{draft.copilotBasis === 'credits'
+          ? 'Copilot sessions are priced by the credits they report, each unit with its own plan; AI credits and premium requests are never mixed. A Copilot session without credits stays unreported.'
+          : 'Copilot sessions are priced by the tokens of the model behind them, using the model prices below. The plans are kept but not applied.'}</p>
       </div>
       <div className="pricing-table" role="table" aria-label="Model prices per million tokens">
         <div className="pricing-row pricing-head" role="row"><span role="columnheader">Model</span>{RATE_FIELDS.map(([field, label]) => <span key={field} role="columnheader">{label} / 1M</span>)}<span role="columnheader"><span className="sr-only">Actions</span></span></div>

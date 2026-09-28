@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { normalizePricing, priceEvents, priceUsage, pricingFrom, withReportedCost } from '../server/metrics/cost.mjs';
+import { normalizePricing, priceEvents, priceRun, priceUsage, pricingFrom, withReportedCost } from '../server/metrics/cost.mjs';
 import { openDatabase } from '../server/persistence/database.mjs';
 import { EventBus } from '../server/core/event-bus.mjs';
 import { createRepositoryService } from '../server/repositories/service.mjs';
@@ -28,14 +28,25 @@ test('a provider-reported cost is never replaced by a configured price', () => {
 });
 
 test('Copilot credits are priced in their own unit and never mixed', () => {
-  const credits = priceUsage({ input: 900, output: 100, credits: 12.5, creditUnit: 'AI credits', cost: null }, 'gpt-5', pricing);
+  const credits = priceUsage({ input: 900, output: 100, credits: 12.5, creditUnit: 'AI credits', cost: null }, 'gpt-5', pricing, 'credits');
   assert.equal(credits.cost, 0.5);
   assert.equal(credits.costSource, 'configured-credits');
-  // No premium request price is configured, so the unit is not converted with
-  // the AI credit price and the run falls back to its model prices.
-  const premium = priceUsage({ input: 1_000_000, output: 0, credits: 3, creditUnit: 'premium requests', cost: null }, 'gpt-5', pricing);
-  assert.equal(premium.costSource, 'configured-estimate');
-  assert.equal(premium.cost, 1.25);
+  // No premium request plan is configured: the unit is not converted with the
+  // AI credit price and the tokens behind it are not used as a fallback.
+  const premium = { input: 1_000_000, output: 0, credits: 3, creditUnit: 'premium requests', cost: null };
+  assert.equal(priceUsage(premium, 'gpt-5', pricing, 'credits'), premium);
+});
+
+test('Settings choose whether Copilot runs are priced by credits or by model tokens', () => {
+  const run = { provider: 'copilot', model: 'gpt-5', usage: { input: 1_000_000, output: 0, credits: 10, creditUnit: 'AI credits', cost: null } };
+  assert.equal(priceRun(run, pricing).usage.cost, 0.4);
+  assert.equal(priceRun(run, pricing).usage.costSource, 'configured-credits');
+  const byTokens = normalizePricing({ ...pricing, copilotBasis: 'tokens' });
+  assert.equal(priceRun(run, byTokens).usage.cost, 1.25);
+  assert.equal(priceRun(run, byTokens).usage.costSource, 'configured-estimate');
+  // Other providers always use model prices, whatever the Copilot basis.
+  assert.equal(priceRun({ ...run, provider: 'codex' }, pricing).usage.costSource, 'configured-estimate');
+  assert.throws(() => normalizePricing({ copilotBasis: 'both' }), /credits or tokens/);
 });
 
 test('missing prices keep cost unreported instead of zero', () => {
@@ -46,7 +57,7 @@ test('missing prices keep cost unreported instead of zero', () => {
 });
 
 test('every measurement of a run is priced on the same basis', () => {
-  const run = { model: 'gpt-5', usage: { input: 2_000_000, output: 0, credits: 2, creditUnit: 'AI credits' } };
+  const run = { provider: 'copilot', model: 'gpt-5', usage: { input: 2_000_000, output: 0, credits: 2, creditUnit: 'AI credits' } };
   const events = priceEvents([
     { id: 1, data: { usage: { input: 1_000_000, output: 0 } } },
     { id: 2, data: { usage: { input: 2_000_000, output: 0, credits: 2, creditUnit: 'AI credits' } } },
@@ -62,7 +73,7 @@ test('the credit price is the plan price divided by the credits it includes', ()
   assert.deepEqual(plans.aiCreditPlan, { usd: 300, credits: 30_000 });
   assert.equal(plans.aiCreditUsd, 0.01);
   assert.equal(plans.premiumRequestUsd, 0.026);
-  assert.equal(priceUsage({ credits: 250, creditUnit: 'AI credits', cost: null }, 'any', plans).cost, 2.5);
+  assert.equal(priceUsage({ credits: 250, creditUnit: 'AI credits', cost: null }, 'any', plans, 'credits').cost, 2.5);
 });
 
 test('invalid prices are rejected and empty rows are dropped', () => {
@@ -70,7 +81,7 @@ test('invalid prices are rejected and empty rows are dropped', () => {
   assert.throws(() => normalizePricing({ aiCreditPlan: { usd: 300 } }), /both the plan price/);
   assert.throws(() => normalizePricing({ premiumRequestPlan: { usd: 10, credits: 0 } }), /greater than zero/);
   assert.throws(() => normalizePricing({ models: { m: { inputPerMillion: 1 } } }), /both input and output/);
-  assert.deepEqual(normalizePricing({ aiCreditPlan: { usd: '', credits: '' }, models: { m: { inputPerMillion: '', outputPerMillion: '' } } }), { aiCreditPlan: null, premiumRequestPlan: null, aiCreditUsd: null, premiumRequestUsd: null, models: {} });
+  assert.deepEqual(normalizePricing({ aiCreditPlan: { usd: '', credits: '' }, models: { m: { inputPerMillion: '', outputPerMillion: '' } } }), { copilotBasis: 'credits', aiCreditPlan: null, premiumRequestPlan: null, aiCreditUsd: null, premiumRequestUsd: null, models: {} });
 });
 
 test('saved prices re-price stored runs and their events when read', async () => {

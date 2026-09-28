@@ -206,6 +206,7 @@ The dashboard distinguishes three concepts that should not be confused:
 Set prices in **Settings → Pricing**:
 
 - **GitHub AI credits plan** and **Legacy premium requests plan:** the subscription price in USD and the credits it includes. The price per credit is derived from them (for example, a hypothetical 300 USD plan with 30,000 AI credits gives 0.01 USD per credit). When GitHub reports the account quota, **Use account quota** fills in the included credits. Copilot sessions that report credits are priced in their own unit; the two units are never mixed or converted into each other.
+- **Copilot sessions priced by:** choose **Subscription credits** (credits reported by each session × the plan's price per credit) or **Model token prices** (the tokens of the model Copilot routes to, priced with the table below). The choice applies to every Copilot session, and the other basis is never used as a fallback.
 - **Model prices:** USD per million input, cached input and output tokens. Every observed model is listed; you can also add a model id before its first session. Cached input falls back to the input price when empty.
 
 Prices are stored in the local SQLite database and applied when sessions are read, so saving a price re-prices every session, its chart and the cost of each iteration in the timeline. A cost reported by the provider always takes precedence, and a session without a matching price keeps its cost unreported. `NOSTRAXIS_PRICING_JSON` still works as a base table; a model priced in Settings overrides it:
