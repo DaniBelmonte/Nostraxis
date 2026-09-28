@@ -15,6 +15,9 @@ const statusLabels = {
 
 const number = (value) => Number.isFinite(value) ? new Intl.NumberFormat('en-GB').format(value) : 'N/A';
 const decimal = (value) => Number.isFinite(value) ? value.toFixed(1) : 'N/A';
+const usd = (value) => Number.isFinite(value) ? `$${value.toFixed(value < 1 ? 3 : 2)}` : 'N/A';
+// Settings price each Copilot credit unit on its own; units are never mixed.
+const creditPrice = (pricing, unit) => ({ 'AI credits': pricing?.aiCreditUsd, 'premium requests': pricing?.premiumRequestUsd })[unit] ?? null;
 const percent = (value) => Number.isFinite(value) ? `${value.toFixed(1)} %` : 'N/A';
 const date = (value) => {
   if (!value || !Number.isFinite(Date.parse(value))) return 'N/A';
@@ -50,8 +53,9 @@ function LimitWindow({ window, now }) {
   </section>;
 }
 
-function CopilotRangeUsage({ usage, creditUnit, limit, range, onRangeChange }) {
+function CopilotRangeUsage({ usage, creditUnit, limit, range, price, onRangeChange }) {
   const hasUsage = Number.isFinite(usage?.creditsUsed);
+  const cost = hasUsage && Number.isFinite(price) ? usage.creditsUsed * price : null;
   const hasPercent = Number.isFinite(usage?.usedPercent);
   return <section className="provider-range-usage" aria-label="Copilot usage by date range">
     <div className="provider-range-heading"><strong>Usage by date</strong><span>{hasUsage ? percent(usage.usedPercent) : 'N/A'}</span></div>
@@ -60,13 +64,14 @@ function CopilotRangeUsage({ usage, creditUnit, limit, range, onRangeChange }) {
       <label>To<input type="date" value={range.to} min={range.from} onChange={(event) => onRangeChange({ ...range, to: event.target.value })} /></label>
     </div>
     <div className="provider-range-value">{hasUsage
-      ? <><strong>{decimal(usage.creditsUsed)} {creditUnit || 'credits'}</strong>{hasPercent && <span>{percent(usage.usedPercent)} of {number(limit)} monthly entitlement</span>}</>
+      ? <><strong>{decimal(usage.creditsUsed)} {creditUnit || 'credits'}{Number.isFinite(cost) && ` · ${usd(cost)}`}</strong>{hasPercent && <span>{percent(usage.usedPercent)} of {number(limit)} monthly entitlement</span>}</>
       : 'No measured credit usage in this range'}</div>
     <small>{hasUsage && hasPercent ? 'Credits used in the selected dates versus the monthly plan limit.' : 'Based on every Copilot chat found in local history.'}</small>
   </section>;
 }
 
-function ProviderPopover({ provider, now, range, onRangeChange, onClose }) {
+function ProviderPopover({ provider, pricing, now, range, onRangeChange, onClose }) {
+  const price = provider.id === 'copilot' ? creditPrice(pricing, provider.creditUnit) : null;
   const status = statusLabels[provider.connection] || 'No data';
   const creditsLabel = provider.creditUnit ? `Credits used · ${provider.creditUnit}` : 'Credits used';
   return <div id={`provider-usage-${provider.id}`} className="provider-usage-popover" role="dialog" aria-label={`${provider.name} usage`}>
@@ -79,10 +84,11 @@ function ProviderPopover({ provider, now, range, onRangeChange, onClose }) {
       {provider.windows?.length
         ? provider.windows.map((window) => <LimitWindow key={window.id} window={window} now={now} />)
         : <dl className="provider-na-limits"><dt>Usage used</dt><dd>N/A</dd><dt>Usage available</dt><dd>N/A</dd><dt>Next reset</dt><dd>N/A</dd></dl>}
-      {provider.id === 'copilot' && <CopilotRangeUsage usage={provider.rangeUsage} creditUnit={provider.creditUnit} limit={provider.windows?.find((window) => Number.isFinite(window.limit))?.limit} range={range} onRangeChange={onRangeChange} />}
+      {provider.id === 'copilot' && <CopilotRangeUsage usage={provider.rangeUsage} creditUnit={provider.creditUnit} limit={provider.windows?.find((window) => Number.isFinite(window.limit))?.limit} range={range} price={price} onRangeChange={onRangeChange} />}
       <dl className="provider-facts">
         <dt>{provider.tokenScope ? `Tokens · ${provider.tokenScope}` : 'Tokens used'}</dt><dd>{number(provider.tokensUsed)}</dd>
         <dt>{creditsLabel}</dt><dd>{decimal(provider.creditsUsed)}</dd>
+        {Number.isFinite(price) && Number.isFinite(provider.creditsUsed) && <><dt>Credit cost equivalent</dt><dd>{usd(provider.creditsUsed * price)}</dd></>}
         {Number.isFinite(provider.creditBalance) && <><dt>Credit balance</dt><dd>{decimal(provider.creditBalance)}</dd></>}
         <dt>Model</dt><dd>{provider.model || 'N/A'}</dd>
         <dt>Plan</dt><dd>{provider.plan || 'N/A'}</dd>
@@ -93,7 +99,7 @@ function ProviderPopover({ provider, now, range, onRangeChange, onClose }) {
   </div>;
 }
 
-export function ProviderUsageDock({ initial }) {
+export function ProviderUsageDock({ initial, pricing }) {
   const [snapshot, setSnapshot] = useState(initial || null);
   const [now, setNow] = useState(Date.now());
   const [openProvider, setOpenProvider] = useState(null);
@@ -130,7 +136,7 @@ export function ProviderUsageDock({ initial }) {
         <AgentIcon id={provider.id} />
         <i className={`provider-connection-dot ${provider.connection}`} />
       </button>
-      {openProvider === provider.id && <ProviderPopover provider={provider} now={now} range={range} onRangeChange={setRange} onClose={() => setOpenProvider(null)} />}
+      {openProvider === provider.id && <ProviderPopover provider={provider} pricing={pricing} now={now} range={range} onRangeChange={setRange} onClose={() => setOpenProvider(null)} />}
     </div>)}
   </aside>;
 }

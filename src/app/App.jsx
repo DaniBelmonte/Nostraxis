@@ -80,7 +80,7 @@ export function App() {
   if (!data) return <div className="boot-screen"><Robot weight="duotone" /><h1>Nostraxis</h1><p>{loadError || 'Starting local runtime, API and SQLite…'}</p></div>;
   return <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={contextPaneWidth ? { '--context-pane-width': `${contextPaneWidth}px` } : undefined}>
     <AppRail active={activeNav} onChange={setActiveNav} online={!loadError} experimentsEnabled={data.features?.experiments === true} />
-    <ProviderUsageDock initial={data.providerUsage} />
+    <ProviderUsageDock initial={data.providerUsage} pricing={data.pricing} />
     {activeNav === 'Sessions' && <>
       <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} />
       <MainTrace detail={detail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Repos')} />
@@ -90,7 +90,7 @@ export function App() {
     {activeNav === 'Compare' && <CompareView runs={data.runs} focusId={selectedSession} onInspect={inspect} />}
     {data.features?.experiments === true && activeNav === 'R&D Lab' && <LabView data={data} reload={reload} setError={setError} />}
     {activeNav === 'Repos' && <RepositoriesView repositories={data.repositories} reload={reload} setError={setError} />}
-    {activeNav === 'Settings' && <SettingsView data={data} />}
+    {activeNav === 'Settings' && <SettingsView data={data} reload={reload} />}
 
     {actionError && <div className="toast-error"><WarningIcon />{actionError}<button onClick={() => setActionError('')}><X /></button></div>}
     {modal === 'new' && <Modal title="New session" onClose={() => setModal(null)}><NewRunForm data={data} onError={setError} onCreated={(run) => { setSelectedSession(run.id); setModal(null); reload(); }} /></Modal>}

@@ -274,7 +274,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .compact-chart-tooltip small { color:#6ed7ad; font:8px 'JetBrains Mono'; }
 
 .events-table { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-.event-header { display: grid; grid-template-columns: 72px 100px minmax(220px, 1fr) 70px 64px; align-items: center; height: 34px; border-bottom: 1px solid var(--line); color: #8ea5b8; font-size: 9px; padding: 0 12px; }
+.event-header { display: grid; grid-template-columns: 72px 100px minmax(220px, 1fr) 70px 104px; align-items: center; height: 34px; border-bottom: 1px solid var(--line); color: #8ea5b8; font-size: 9px; padding: 0 12px; }
 .event-header span:nth-last-child(-n+2) { text-align: right; }
 .event-body { overflow: auto; scrollbar-width: thin; scrollbar-color: #2a4356 transparent; }
 .phase-row { min-height: 29px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; border-bottom: 1px solid var(--line-soft); background: #0c1b27; }
@@ -288,12 +288,13 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .phase-download:hover { border-color: #5e9cc3; color: #e3f4ff; background: #17405a; }
 .phase-download:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 .phase-download svg { width: 11px; height: 11px; }
-.event-row { width: 100%; height: 29px; border: 0; border-bottom: 1px solid #1b2d3a; background: transparent; padding: 0 12px; display: grid; grid-template-columns: 72px 100px minmax(220px, 1fr) 70px 64px; align-items: center; text-align: left; cursor: pointer; color: #a9bdcb; font-size: 9px; }
+.event-row { width: 100%; height: 29px; border: 0; border-bottom: 1px solid #1b2d3a; background: transparent; padding: 0 12px; display: grid; grid-template-columns: 72px 100px minmax(220px, 1fr) 70px 104px; align-items: center; text-align: left; cursor: pointer; color: #a9bdcb; font-size: 9px; }
 .event-row:hover, .event-row.selected { background: #102534; }
 .event-row.warning { background: #332817; color: #efc669; }
 .event-row.warning:hover { background: #44331b; }
 .event-row > code { font-size: 9px; color: inherit; }
 .event-row > code:nth-last-child(-n+2) { text-align: right; }
+.event-cost-step { margin-left: 5px; color: #70c5ac; font-size: 8px; }
 .event-type { display: flex; align-items: center; gap: 6px; min-width: 0; color: #36b7ff; }
 .event-type-thinking { color: #b680ff; }
 .event-type-completed { color: #70c5ac; }
@@ -469,6 +470,44 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .repo-grid article { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 10px; }.repo-grid svg { color: var(--blue); width: 22px; }.repo-grid h3, .provider-grid h3 { margin: 0 0 6px; font-size: 12px; }.repo-grid code { display: block; color: #88a9be; font-size: 8px; overflow: hidden; text-overflow: ellipsis; }.repo-grid dl { grid-column: 2; display: grid; grid-template-columns: 60px 1fr; gap: 6px; margin: 8px 0 0; font-size: 9px; }.repo-grid dt { color: #7992a5; }.repo-grid dd { margin: 0; }
 .provider-grid article > div { display: flex; gap: 8px; align-items: center; }.provider-grid article h3 { margin: 0; }.provider-grid strong { display: block; margin: 10px 0 6px; font: 10px 'JetBrains Mono'; }.provider-grid p { color: #7f98aa; font-size: 9px; margin: 0; }.provider-grid p code { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .definition-list > div { display: grid; grid-template-columns: 130px 1fr 100px 220px; gap: 8px; align-items: center; min-height: 38px; padding: 0 12px; border-top: 1px solid var(--line-soft); font-size: 9px; }.definition-list code { color: #54baff; }.definition-list span, .definition-list small { color: #7f98aa; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.pricing-panel input { min-width: 0; width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: #091720; border: 1px solid #395063; border-radius: 3px; font: 10px 'JetBrains Mono'; color-scheme: dark; }
+.pricing-panel input::placeholder { color: #5f7a8d; }
+.pricing-credits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; border-bottom: 1px solid var(--line-soft); }
+.pricing-basis { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px; }
+.pricing-basis > div:first-child { display: grid; gap: 3px; }.pricing-basis strong { color: #e2edf4; font-size: 11px; }.pricing-basis small { color: #7890a3; font-size: 9px; }
+.pricing-basis .group-mode-toggle button { height: 30px; padding: 0 12px; font-size: 10px; }
+.pricing-plan { min-width: 0; margin: 0; border: 1px solid #304858; background: #091923; padding: 10px 12px 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; align-content: start; }
+.pricing-plan.inactive { opacity: .55; }
+.pricing-plan legend { padding: 0 4px; color: #e2edf4; font-size: 11px; font-weight: 600; }
+.pricing-credits label { display: grid; gap: 5px; color: #b9cad6; font-size: 10px; }.pricing-credits label small { color: #7890a3; font-size: 9px; }
+.pricing-derived { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 6px; margin: 0; color: #7f98aa; font-size: 9px; }.pricing-derived strong { color: #70c5ac; font: 12px 'JetBrains Mono'; }
+.pricing-plan .secondary-button { grid-column: 1 / -1; justify-self: start; }
+.pricing-credits > p { grid-column: 1 / -1; margin: 0; color: #7f98aa; font-size: 9px; line-height: 1.55; }
+.pricing-row { display: grid; grid-template-columns: minmax(180px, 1.6fr) repeat(3, minmax(90px, 1fr)) 30px; gap: 8px; align-items: center; min-height: 44px; padding: 6px 12px; border-top: 1px solid var(--line-soft); font-size: 9px; }
+.pricing-head { min-height: 30px; border-top: 0; background: #091923; color: #8099ab; }
+.pricing-model { min-width: 0; display: grid; gap: 3px; }.pricing-model code { color: #54baff; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.pricing-model small { color: #7f98aa; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pricing-add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 12px; border-top: 1px solid var(--line-soft); }
+.pricing-add-row button:disabled, .pricing-footer button:disabled { opacity: .5; cursor: not-allowed; }
+.pricing-add { flex: 0 1 240px; min-width: 160px; }
+/* The save bar follows the panel while it scrolls, so Save is always in reach. */
+.pricing-footer { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 10px 12px; border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; background: #0d1c27; box-shadow: 0 -10px 18px #0b192499; }
+.pricing-footer .primary-button { justify-self: auto; height: 30px; }
+.pricing-save-state { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; margin: 0; color: #6f8a9d; font-size: 10px; }.pricing-save-state svg { flex: none; width: 14px; height: 14px; }
+.pricing-footer.dirty { border-top-color: #8a6a2c; }.pricing-footer.dirty .pricing-save-state { color: #efc669; }
+.pricing-footer.saved .pricing-save-state { color: #70c5ac; }.pricing-footer.error .pricing-save-state { color: #f8a269; }
+@media (max-width: 720px) {
+  .pricing-credits { grid-template-columns: minmax(0, 1fr); }
+  .pricing-head { display: none; }
+  .pricing-row { grid-template-columns: repeat(3, minmax(0, 1fr)) 30px; align-items: end; }
+  .pricing-model { grid-column: 1 / -1; }
+  .pricing-row > span[data-label] { display: grid; gap: 4px; }
+  .pricing-row > span[data-label]::before { content: attr(data-label); color: #8099ab; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pricing-row > span:last-child { align-self: end; }
+  .pricing-add-row .pricing-add, .pricing-save-state { flex-basis: 100%; }
+  .pricing-footer .secondary-button, .pricing-add-row .secondary-button, .pricing-plan .secondary-button { max-width: none; }
+  .pricing-footer .primary-button { flex: 1; }
+}
 .architecture-note { margin-top: 12px; border: 1px solid #285b72; background: #0b2634; padding: 16px; display: grid; grid-template-columns: 30px 1fr; gap: 10px; }.architecture-note svg { color: var(--blue); width: 24px; }.architecture-note h2 { font-size: 13px; margin: 0 0 6px; }.architecture-note p { margin: 0; color: #91aaba; font-size: 10px; line-height: 1.6; }
 
 .agent-icon { flex: none; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: #10222f; color: #d7e3ec; }
