@@ -12,7 +12,7 @@ import { createRunManager } from '../server/runtime/run-manager.mjs';
 import { createApi } from '../server/api.mjs';
 
 const pricing = normalizePricing({
-  aiCreditUsd: 0.04,
+  aiCreditPlan: { usd: 400, credits: 10_000 },
   models: { 'gpt-5': { inputPerMillion: 1.25, cachedInputPerMillion: 0.125, outputPerMillion: 10 } },
 });
 
@@ -57,10 +57,20 @@ test('every measurement of a run is priced on the same basis', () => {
   assert.deepEqual(events[2], { id: 3, data: { text: 'no usage' } });
 });
 
+test('the credit price is the plan price divided by the credits it includes', () => {
+  const plans = normalizePricing({ aiCreditPlan: { usd: '300', credits: '30000' }, premiumRequestPlan: { usd: 39, credits: 1500 } });
+  assert.deepEqual(plans.aiCreditPlan, { usd: 300, credits: 30_000 });
+  assert.equal(plans.aiCreditUsd, 0.01);
+  assert.equal(plans.premiumRequestUsd, 0.026);
+  assert.equal(priceUsage({ credits: 250, creditUnit: 'AI credits', cost: null }, 'any', plans).cost, 2.5);
+});
+
 test('invalid prices are rejected and empty rows are dropped', () => {
-  assert.throws(() => normalizePricing({ aiCreditUsd: -1 }), /non-negative/);
+  assert.throws(() => normalizePricing({ aiCreditPlan: { usd: -1, credits: 10 } }), /non-negative/);
+  assert.throws(() => normalizePricing({ aiCreditPlan: { usd: 300 } }), /both the plan price/);
+  assert.throws(() => normalizePricing({ premiumRequestPlan: { usd: 10, credits: 0 } }), /greater than zero/);
   assert.throws(() => normalizePricing({ models: { m: { inputPerMillion: 1 } } }), /both input and output/);
-  assert.deepEqual(normalizePricing({ aiCreditUsd: '', models: { m: { inputPerMillion: '', outputPerMillion: '' } } }), { aiCreditUsd: null, premiumRequestUsd: null, models: {} });
+  assert.deepEqual(normalizePricing({ aiCreditPlan: { usd: '', credits: '' }, models: { m: { inputPerMillion: '', outputPerMillion: '' } } }), { aiCreditPlan: null, premiumRequestPlan: null, aiCreditUsd: null, premiumRequestUsd: null, models: {} });
 });
 
 test('saved prices re-price stored runs and their events when read', async () => {
@@ -107,15 +117,16 @@ test('pricing settings are saved through a JSON-only API route', async () => {
     return { status: result.status, json: JSON.parse(result.body) };
   };
   try {
-    const body = JSON.stringify({ aiCreditUsd: '0.04', models: { 'gpt-5': { inputPerMillion: '1.25', outputPerMillion: '10' } } });
+    const body = JSON.stringify({ aiCreditPlan: { usd: '300', credits: '30000' }, models: { 'gpt-5': { inputPerMillion: '1.25', outputPerMillion: '10' } } });
     assert.equal((await call({ method: 'PUT', headers: { 'content-type': 'text/plain' }, body })).status, 403);
     const saved = await call({ method: 'PUT', headers: { 'content-type': 'application/json' }, body });
     assert.equal(saved.status, 200);
-    assert.equal(saved.json.aiCreditUsd, 0.04);
+    assert.deepEqual(saved.json.aiCreditPlan, { usd: 300, credits: 30_000 });
+    assert.equal(saved.json.aiCreditUsd, 0.01);
     assert.deepEqual(saved.json.models['gpt-5'], { inputPerMillion: 1.25, cachedInputPerMillion: null, outputPerMillion: 10 });
-    const invalid = await call({ method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ premiumRequestUsd: 'free' }) });
+    const invalid = await call({ method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ premiumRequestPlan: { usd: 'free', credits: 10 } }) });
     assert.equal(invalid.status, 400);
-    assert.equal((await call({ method: 'GET' })).json.aiCreditUsd, 0.04);
+    assert.equal((await call({ method: 'GET' })).json.aiCreditUsd, 0.01);
   } finally {
     await api.close();
     await rm(dir, { recursive: true, force: true });

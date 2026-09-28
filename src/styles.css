@@ -473,9 +473,13 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .pricing-panel input { min-width: 0; width: 100%; height: 30px; padding: 0 8px; color: var(--text); background: #091720; border: 1px solid #395063; border-radius: 3px; font: 10px 'JetBrains Mono'; color-scheme: dark; }
 .pricing-panel input::placeholder { color: #5f7a8d; }
-.pricing-credits { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)) minmax(0, 1fr); gap: 12px; align-items: end; padding: 12px; border-bottom: 1px solid var(--line-soft); }
+.pricing-credits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; border-bottom: 1px solid var(--line-soft); }
+.pricing-plan { min-width: 0; margin: 0; border: 1px solid #304858; background: #091923; padding: 10px 12px 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; align-content: start; }
+.pricing-plan legend { padding: 0 4px; color: #e2edf4; font-size: 11px; font-weight: 600; }
 .pricing-credits label { display: grid; gap: 5px; color: #b9cad6; font-size: 10px; }.pricing-credits label small { color: #7890a3; font-size: 9px; }
-.pricing-credits p { margin: 0; color: #7f98aa; font-size: 9px; line-height: 1.55; }
+.pricing-derived { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 6px; margin: 0; color: #7f98aa; font-size: 9px; }.pricing-derived strong { color: #70c5ac; font: 12px 'JetBrains Mono'; }
+.pricing-plan .secondary-button { grid-column: 1 / -1; justify-self: start; }
+.pricing-credits > p { grid-column: 1 / -1; margin: 0; color: #7f98aa; font-size: 9px; line-height: 1.55; }
 .pricing-row { display: grid; grid-template-columns: minmax(180px, 1.6fr) repeat(3, minmax(90px, 1fr)) 30px; gap: 8px; align-items: center; min-height: 44px; padding: 6px 12px; border-top: 1px solid var(--line-soft); font-size: 9px; }
 .pricing-head { min-height: 30px; border-top: 0; background: #091923; color: #8099ab; }
 .pricing-model { min-width: 0; display: grid; gap: 3px; }.pricing-model code { color: #54baff; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.pricing-model small { color: #7f98aa; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -491,7 +495,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
   .pricing-row > span[data-label]::before { content: attr(data-label); color: #8099ab; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pricing-row > span:last-child { align-self: end; }
   .pricing-footer .pricing-add, .pricing-footer > small { flex-basis: 100%; }
-  .pricing-footer .secondary-button { max-width: none; }
+  .pricing-footer .secondary-button, .pricing-plan .secondary-button { max-width: none; }
   .pricing-footer .primary-button { flex: 1; }
 }
 .architecture-note { margin-top: 12px; border: 1px solid #285b72; background: #0b2634; padding: 16px; display: grid; grid-template-columns: 30px 1fr; gap: 10px; }.architecture-note svg { color: var(--blue); width: 24px; }.architecture-note h2 { font-size: 13px; margin: 0 0 6px; }.architecture-note p { margin: 0; color: #91aaba; font-size: 10px; line-height: 1.6; }

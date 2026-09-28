@@ -4,10 +4,14 @@ import { api } from '../../../shared/api/client';
 import { PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 
 const RATE_FIELDS = [['inputPerMillion', 'Input'], ['cachedInputPerMillion', 'Cached input'], ['outputPerMillion', 'Output']];
+const PLANS = [
+  ['aiCreditPlan', 'AI credits', 'GitHub AI credits plan', 'AI credit'],
+  ['premiumRequestPlan', 'premium requests', 'Legacy premium requests plan', 'premium request'],
+];
 const text = (value) => Number.isFinite(value) ? String(value) : '';
+const usdPerUnit = (value) => `$${value.toLocaleString('en-GB', { maximumFractionDigits: 6 })}`;
 const draftFrom = (pricing) => ({
-  aiCreditUsd: text(pricing?.aiCreditUsd),
-  premiumRequestUsd: text(pricing?.premiumRequestUsd),
+  ...Object.fromEntries(PLANS.map(([key]) => [key, { usd: text(pricing?.[key]?.usd), credits: text(pricing?.[key]?.credits) }])),
   models: Object.fromEntries(Object.entries(pricing?.models || {}).map(([model, rates]) => [model, Object.fromEntries(RATE_FIELDS.map(([field]) => [field, text(rates[field])]))])),
 });
 
@@ -25,11 +29,25 @@ const modelRows = (runs, models) => {
   return [...rows, ...Object.keys(models).filter((model) => !observed.has(model)).sort().map((model) => ({ model, providers: new Set(), sessions: 0, observed: false }))];
 };
 
-function RateInput({ label, value, onChange }) {
-  return <input type="number" min="0" step="any" inputMode="decimal" placeholder="Not set" aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} />;
+function RateInput({ label, value, onChange, placeholder = 'Not set' }) {
+  return <input type="number" min="0" step="any" inputMode="decimal" placeholder={placeholder} aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} />;
 }
 
-export function PricingPanel({ pricing, runs, reload }) {
+// The price per credit is derived, never typed: plan price / credits included.
+function CreditPlan({ unit, title, single, value, quota, onChange }) {
+  const usd = Number(value.usd);
+  const credits = Number(value.credits);
+  const derived = value.usd !== '' && value.credits !== '' && Number.isFinite(usd) && Number.isFinite(credits) && credits > 0 ? usd / credits : null;
+  return <fieldset className="pricing-plan">
+    <legend>{title}</legend>
+    <label>Subscription price<small>USD for the plan</small><RateInput label={`${title} price in USD`} value={value.usd} onChange={(next) => onChange({ ...value, usd: next })} /></label>
+    <label>Credits included<small>{`${unit} in the plan`}</small><RateInput label={`${unit} included in the plan`} value={value.credits} placeholder={Number.isFinite(quota) ? String(quota) : 'Not set'} onChange={(next) => onChange({ ...value, credits: next })} /></label>
+    <p className="pricing-derived"><strong>{derived == null ? '—' : usdPerUnit(derived)}</strong><span>{derived == null ? `per ${single} · set both values to derive it` : `per ${single}`}</span></p>
+    {Number.isFinite(quota) && String(quota) !== value.credits && <button type="button" className="secondary-button" onClick={() => onChange({ ...value, credits: String(quota) })}>Use account quota · {quota.toLocaleString('en-GB')}</button>}
+  </fieldset>;
+}
+
+export function PricingPanel({ pricing, runs, providerUsage, reload }) {
   const saved = useMemo(() => draftFrom(pricing), [pricing]);
   const [draft, setDraft] = useState(saved);
   const [newModel, setNewModel] = useState('');
@@ -39,6 +57,10 @@ export function PricingPanel({ pricing, runs, reload }) {
   useEffect(() => { if (!dirty) setDraft(saved); }, [saved]);
   const rows = modelRows(runs, draft.models);
   const environmentModels = pricing?.environmentModels || [];
+  // The account entitlement GitHub reports is the credit total of the plan.
+  const copilot = providerUsage?.providers?.find((provider) => provider.id === 'copilot');
+  const quota = copilot?.windows?.find((window) => Number.isFinite(window.limit))?.limit;
+  const quotaFor = (unit) => copilot?.creditUnit === unit ? quota : null;
   const setRate = (model, field, value) => setDraft((current) => ({ ...current, models: { ...current.models, [model]: { ...current.models[model], [field]: value } } }));
   const removeModel = (model) => setDraft((current) => { const models = { ...current.models }; delete models[model]; return { ...current, models }; });
   const addModel = () => {
@@ -61,8 +83,7 @@ export function PricingPanel({ pricing, runs, reload }) {
     <header><div><span>Pricing</span><h2>Cost equivalents · USD</h2></div><small>A cost reported by the provider always takes precedence.</small></header>
     <form onSubmit={submit}>
       <div className="pricing-credits">
-        <label>GitHub AI credit<small>USD per AI credit</small><RateInput label="USD per GitHub AI credit" value={draft.aiCreditUsd} onChange={(value) => setDraft((current) => ({ ...current, aiCreditUsd: value }))} /></label>
-        <label>Legacy premium request<small>USD per premium request</small><RateInput label="USD per legacy premium request" value={draft.premiumRequestUsd} onChange={(value) => setDraft((current) => ({ ...current, premiumRequestUsd: value }))} /></label>
+        {PLANS.map(([key, unit, title, single]) => <CreditPlan key={key} unit={unit} title={title} single={single} value={draft[key]} quota={quotaFor(unit)} onChange={(value) => setDraft((current) => ({ ...current, [key]: value }))} />)}
         <p>Copilot sessions that report credits are priced in their own unit; AI credits and premium requests are never mixed. Sessions without credits fall back to the model prices below.</p>
       </div>
       <div className="pricing-table" role="table" aria-label="Model prices per million tokens">

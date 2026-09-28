@@ -13,6 +13,19 @@ const rate = (value, label) => {
   return number;
 };
 
+// A credit is priced from the subscription that includes it: plan price
+// divided by the credits the account receives for that price.
+function plan(value, unit) {
+  const usd = rate(value?.usd, `Plan price for ${unit}`);
+  const credits = rate(value?.credits, `Included ${unit}`);
+  if (usd == null && credits == null) return null;
+  if (usd == null || credits == null) throw new Error(`Set both the plan price and the included ${unit}.`);
+  if (credits === 0) throw new Error(`Included ${unit} must be greater than zero.`);
+  return { usd, credits };
+}
+
+const unitPrice = (value) => value ? value.usd / value.credits : null;
+
 export function normalizePricing(value = {}) {
   const models = {};
   for (const [key, rates] of Object.entries(value?.models || {})) {
@@ -24,7 +37,9 @@ export function normalizePricing(value = {}) {
     if (entry.inputPerMillion == null || entry.outputPerMillion == null) throw new Error(`${model} needs both input and output prices.`);
     models[model] = entry;
   }
-  return { aiCreditUsd: rate(value?.aiCreditUsd, 'AI credit price'), premiumRequestUsd: rate(value?.premiumRequestUsd, 'Premium request price'), models };
+  const aiCreditPlan = plan(value?.aiCreditPlan, 'AI credits');
+  const premiumRequestPlan = plan(value?.premiumRequestPlan, 'premium requests');
+  return { aiCreditPlan, premiumRequestPlan, aiCreditUsd: unitPrice(aiCreditPlan), premiumRequestUsd: unitPrice(premiumRequestPlan), models };
 }
 
 function environmentModels() {
