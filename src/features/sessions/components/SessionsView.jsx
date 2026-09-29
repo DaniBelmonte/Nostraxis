@@ -13,7 +13,7 @@ import { FilterBar } from '../../../shared/components/FilterBar';
 import { SessionCard } from '../../../shared/components/SessionCard';
 import { api } from '../../../shared/api/client';
 
-export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync }) {
+export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync, sessionsWidth, onResizeStart, onResizeKeyDown }) {
   const [scope, setScope] = useState('all');
   const [groupMode, setGroupMode] = useState('project');
   const [query, setQuery] = useState('');
@@ -27,14 +27,16 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
     setFilters((current) => current.workload === 'All' ? current : { ...current, workload: 'All' });
     setGroupMode((current) => current === 'workload' ? 'project' : current);
   }, [isHermesSelected]);
-  const category = (run) => run.status === 'running' || run.status === 'queued' ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
+  // A session waiting for approval is still live: it sits in Live and also needs attention.
+  const category = (run) => ['running', 'queued', 'waiting'].includes(run.status) ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
+  const inScope = (run, id) => category(run) === id || (id === 'attention' && run.status === 'waiting');
   const counts = useMemo(() => ({
-    live: runs.filter((run) => category(run) === 'live').length,
-    attention: runs.filter((run) => category(run) === 'attention').length,
-    completed: runs.filter((run) => category(run) === 'completed').length,
+    live: runs.filter((run) => inScope(run, 'live')).length,
+    attention: runs.filter((run) => inScope(run, 'attention')).length,
+    completed: runs.filter((run) => inScope(run, 'completed')).length,
   }), [runs]);
   const groups = useMemo(() => {
-    const scoped = scope === 'all' ? runs : runs.filter((run) => category(run) === scope);
+    const scoped = scope === 'all' ? runs : runs.filter((run) => inScope(run, scope));
     if (groupMode === 'project') {
       return [...new Set(scoped.map((run) => run.repositoryName || 'No project'))]
         .map((project) => ({
@@ -83,7 +85,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   ];
   const moreFilters = [
     ...(isHermesSelected ? [filterSelect('workload', 'Hermes type', options('workload'))] : []),
-    filterSelect('state', 'Status', ['All', 'running', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
+    filterSelect('state', 'Status', ['All', 'running', 'waiting', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
     filterSelect('origin', 'Origin', ['All', 'External', 'Dashboard']),
     filterSelect('age', 'Updated', ['Any', '24 hours', '7 days', '30 days']),
     filterSelect('cost', 'Cost', ['Any', '> $1', '< $0.50']),
@@ -97,6 +99,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   });
 
   return <aside className="sessions-pane">
+    <PaneResizeHandle className="sessions-resize-handle" label="Resize sessions panel" direction={1} min={240} max={560} width={sessionsWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />
     <div className="sessions-heading"><h1>Sessions</h1><div className="sessions-heading-actions"><button className="icon-button" onClick={sync} disabled={syncing} aria-label="Sync external sessions" title="Sync external sessions"><ArrowsClockwise className={syncing ? 'spinning' : ''} /></button><button className="secondary-button" onClick={onNewSession}>+ New session</button></div></div>
     <div className="session-tabs" role="tablist">{tabs.map(([id, label, count]) => <button key={id} className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{label} <span>{count}</span></button>)}</div>
     <div className="session-source-strip"><span><i className={availableSources.length ? 'online' : ''} />{externalSessionCount} external</span><small>{availableSources.length ? `${availableProviders.join(' · ')} live` : 'No local sources detected'}</small></div>
@@ -351,19 +354,19 @@ function LoadedContext({ files, tools, run, snapshot }) {
   </section>;
 }
 
-function ContextResizeHandle({ width, onResizeStart, onResizeKeyDown }) {
+function PaneResizeHandle({ className, label, direction, min, max, width, onResizeStart, onResizeKeyDown }) {
   const onKeyDown = (event) => {
-    const adjustments = { ArrowLeft: 32, ArrowRight: -32, Home: -1000, End: 1000 };
+    const adjustments = { ArrowLeft: -32 * direction, ArrowRight: 32 * direction, Home: -1000, End: 1000 };
     if (!(event.key in adjustments)) return;
     event.preventDefault();
     onResizeKeyDown(adjustments[event.key]);
   };
-  return <div className="context-resize-handle" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin={300} aria-valuemax={760} aria-valuenow={Math.round(width)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={onKeyDown} />;
+  return <div className={`pane-resize-handle ${className}`} role="separator" aria-label={label} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(width)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={onKeyDown} />;
 }
 
 export function ContextPane({ detail, tab, onTab, contextWidth, onResizeStart, onResizeKeyDown }) {
   const [copied, setCopied] = useState(false);
-  const resizeHandle = <ContextResizeHandle width={contextWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />;
+  const resizeHandle = <PaneResizeHandle className="context-resize-handle" label="Resize context panel" direction={-1} min={300} max={760} width={contextWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />;
   if (!detail) return <aside className="context-pane">{resizeHandle}<div className="context-empty"><Database /><h3>No context captured</h3><p>The selected run's commit, prompts, files, tools and metrics will appear here.</p></div></aside>;
   const { run, files, tools } = detail;
   const metrics = metricsOf(run);

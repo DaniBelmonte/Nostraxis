@@ -39,7 +39,7 @@ export const statusTone = (status) => status === 'running' || status === 'queued
   : status === 'completed' ? 'done' : 'warning';
 
 export const statusLabel = (status) => ({
-  running: 'Live', queued: 'Queued', completed: 'Completed', failed: 'Failed',
+  running: 'Live', waiting: 'Needs approval', queued: 'Queued', completed: 'Completed', failed: 'Failed',
   cancelled: 'Cancelled', stopped: 'Stopped', unknown: 'Unconfirmed', idle: 'Idle', draft: 'Draft',
 }[status] || status);
 

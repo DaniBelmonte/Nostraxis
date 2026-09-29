@@ -99,7 +99,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 button, a { -webkit-tap-highlight-color: transparent; }
 code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-.observatory-shell { display: grid; grid-template-columns: clamp(74px, 6.2vw, 94px) clamp(280px, 21.9vw, 330px) minmax(480px, 1fr) var(--context-pane-width, clamp(320px, 26vw, 392px)); height: 100vh; min-height: 720px; background: var(--bg); }
+.observatory-shell { display: grid; grid-template-columns: clamp(74px, 6.2vw, 94px) var(--sessions-pane-width, clamp(280px, 21.9vw, 330px)) minmax(480px, 1fr) var(--context-pane-width, clamp(320px, 26vw, 392px)); height: 100vh; min-height: 720px; background: var(--bg); }
 
 .provider-usage-dock { position: fixed; top: 14px; right: 14px; z-index: 18; display: flex; gap: 4px; }
 .provider-usage-item { position: relative; }
@@ -166,7 +166,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .system-state strong { display: block; color: var(--green); font-weight: 500; margin-top: 5px; }
 .today { padding: 0 12px 18px; color: #7891a4; font: 10px/1.7 'JetBrains Mono'; }
 
-.sessions-pane { background: #0b1a26; border-right: 1px solid var(--line); min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+.sessions-pane { position: relative; background: #0b1a26; border-right: 1px solid var(--line); min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
 .sessions-heading { min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; }
 .sessions-heading h1 { font-size: 18px; letter-spacing: -.02em; margin: 0; }
 .sessions-heading-actions { display: flex; align-items: center; gap: 6px; }
@@ -213,7 +213,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .status-dot.live { background: var(--green); box-shadow: 0 0 10px #43d59a55; }
 .status-dot.warning { background: var(--amber); }
 .status-dot.done { background: #7994aa; box-shadow: inset 0 0 0 2px #0e1c27; outline: 1px solid #7994aa; }
-.session-card { width: 100%; min-height: 62px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; text-align: left; cursor: pointer; }
+.session-card { width: 100%; min-height: 71px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; text-align: left; cursor: pointer; }
 .session-card:hover { background: #102434; }
 .session-card.selected { background: #133249; box-shadow: inset 2px 0 var(--blue); }
 .session-card .agent-icon { position: relative; }
@@ -306,9 +306,11 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .event-row > span:nth-child(3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .context-pane { position: relative; background: #0a1925; border-left: 1px solid var(--line); overflow: hidden; display: flex; flex-direction: column; min-width: 0; container: context / inline-size; }
-.context-resize-handle { position: absolute; z-index: 5; top: 0; bottom: 0; left: -5px; width: 10px; cursor: col-resize; touch-action: none; }
-.context-resize-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: #35556a; opacity: .72; }
-.context-resize-handle:hover::after, .context-resize-handle:focus-visible::after { background: var(--blue); opacity: 1; box-shadow: 0 0 10px #35a7ff99; }
+.pane-resize-handle { position: absolute; z-index: 5; top: 0; bottom: 0; width: 10px; cursor: col-resize; touch-action: none; }
+.context-resize-handle { left: -5px; }
+.sessions-resize-handle { right: -5px; }
+.pane-resize-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: #35556a; opacity: .72; }
+.pane-resize-handle:hover::after, .pane-resize-handle:focus-visible::after { background: var(--blue); opacity: 1; box-shadow: 0 0 10px #35a7ff99; }
 .context-tabs { min-height: 88px; flex: 0 0 88px; border-bottom: 1px solid var(--line); display: grid; grid-auto-flow: column; grid-auto-columns: minmax(94px, 1fr); padding: 44px 8px 0; gap: 2px; overflow-x: auto; scrollbar-width: thin; }
 .context-tabs button { min-width:94px; position: relative; border: 0; background: transparent; color: #9db0c0; padding: 0 10px; font-size: 10px; cursor: pointer; white-space: nowrap; }
 .context-tabs button.active { color: #69c9ff; }
@@ -663,11 +665,11 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
   .chart-inspector > span { white-space:normal; }
 }
 @media (max-width:1320px) {
-  .observatory-shell:not(.workspace-shell) { grid-template-columns:68px 270px minmax(420px,1fr) var(--context-pane-width, minmax(290px,320px)); min-width:0; }
+  .observatory-shell:not(.workspace-shell) { grid-template-columns:68px var(--sessions-pane-width, 270px) minmax(420px,1fr) var(--context-pane-width, minmax(290px,320px)); min-width:0; }
   .trace-toolbar { padding-right:10px; }
 }
 @media (max-width:1080px) {
-  .observatory-shell:not(.workspace-shell) { grid-template-columns:68px 270px minmax(0,1fr); grid-template-rows:minmax(430px,58vh) minmax(290px,42vh); }
+  .observatory-shell:not(.workspace-shell) { grid-template-columns:68px var(--sessions-pane-width, 270px) minmax(0,1fr); grid-template-rows:minmax(430px,58vh) minmax(290px,42vh); }
   .app-rail { grid-column:1; grid-row:1 / span 2; }
   .sessions-pane { grid-column:2; grid-row:1 / span 2; }
   .trace-pane { grid-column:3; grid-row:1; }
@@ -682,6 +684,7 @@ code, pre { font-family: 'JetBrains Mono', ui-monospace, monospace; }
   .observatory-shell:not(.workspace-shell) { grid-template-columns:54px minmax(0,1fr); grid-template-rows:minmax(300px,42vh) minmax(720px,auto) minmax(440px,auto); height:auto; min-height:100vh; overflow:visible; }
   .app-rail { grid-column:1; grid-row:1 / span 3; position:sticky; top:0; height:100vh; z-index:4; }
   .sessions-pane { grid-column:2; grid-row:1; min-height:300px; }
+  .sessions-resize-handle { display:none; }
   .trace-pane { grid-column:2; grid-row:2; height:max(720px,100vh); min-height:0; overflow:hidden; }
   .context-pane { grid-column:2; grid-row:3; display:flex; min-height:440px; max-height:75vh; }
   .trace-toolbar { padding-right:112px; }

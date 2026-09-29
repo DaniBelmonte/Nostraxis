@@ -12,6 +12,10 @@ const isoDate = (value, fallback = null) => {
 const short = (value, length = 240) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, length);
 const observedSessionId = (provider, nativeId) => `external-${createHash('sha256').update(`${provider}:${nativeId}`).digest('hex').slice(0, 24)}`;
 const LIVE_ACTIVITY_WINDOW_MS = 5 * 60 * 1000;
+const WAITING_WINDOW_MS = 24 * 60 * 60 * 1000;
+const WORKING_WINDOW_MS = 60 * 60 * 1000;
+const MODEL_STATE_PENDING = 0;
+const MODEL_STATE_NEEDS_INPUT = 4;
 
 function clone(value) {
   return value == null ? value : structuredClone(value);
@@ -182,7 +186,7 @@ function toolEvents(request, fallback) {
   return events;
 }
 
-export async function buildVscodeCopilotSnapshot(document, filename, fallbackTimestamp = new Date().toISOString()) {
+export async function buildVscodeCopilotSnapshot(document, filename, fallbackTimestamp = new Date().toISOString(), modifiedAt = null) {
   if (!isVscodeCopilotChat(document)) return null;
   const documentIsCopilot = /github copilot/i.test(document.responderUsername || '');
   const requests = document.requests.filter((request) => request && request.hiddenFromTranscript !== true
@@ -215,11 +219,20 @@ export async function buildVscodeCopilotSnapshot(document, filename, fallbackTim
   const hasFreshPendingRequest = Array.isArray(document.pendingRequests) && document.pendingRequests.length > 0
     && Number.isFinite(observedAt) && Number.isFinite(lastActivityAt)
     && lastActivityAt >= observedAt - LIVE_ACTIVITY_WINDOW_MS;
-  const status = hasFreshPendingRequest ? 'running' : lastResponse ? 'completed' : 'stopped';
+  // VS Code tracks each response as Pending (working) or NeedsInput (waiting for a
+  // tool or command approval). The state outlives the response timestamps, so it
+  // is trusted for a bounded time after the last visible activity.
+  const modelState = requests.at(-1)?.modelState?.value;
+  // The chat file is rewritten on every step, so its mtime is fresher than the response timestamps.
+  const idleMs = observedAt - Math.max(lastActivityAt, Number.isFinite(modifiedAt) ? modifiedAt : -Infinity);
+  const needsInput = modelState === MODEL_STATE_NEEDS_INPUT && idleMs <= WAITING_WINDOW_MS;
+  const working = modelState === MODEL_STATE_PENDING && idleMs <= WORKING_WINDOW_MS;
+  const status = needsInput ? 'waiting' : hasFreshPendingRequest || working ? 'running' : lastResponse ? 'completed' : 'stopped';
+  const active = status === 'running' || status === 'waiting';
   events.push({
-    type: status === 'running' ? 'agent.activity' : status === 'completed' ? 'agent.completed' : 'agent.stopped',
+    type: active ? 'agent.activity' : status === 'completed' ? 'agent.completed' : 'agent.stopped',
     timestamp: updatedAt,
-    data: { text: status === 'running' ? 'VS Code Copilot Chat is active' : 'VS Code Copilot Chat observed' },
+    data: { text: status === 'waiting' ? 'VS Code Copilot Chat is waiting for approval' : status === 'running' ? 'VS Code Copilot Chat is active' : 'VS Code Copilot Chat observed' },
   });
   return {
     snapshot: {
@@ -232,7 +245,7 @@ export async function buildVscodeCopilotSnapshot(document, filename, fallbackTim
       response: lastResponse,
       repositoryPath: workspace,
       startedAt,
-      endedAt: status === 'running' ? null : updatedAt,
+      endedAt: active ? null : updatedAt,
       updatedAt,
       status,
       usage,
