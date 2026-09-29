@@ -40,6 +40,9 @@ Everything in the flow lives in this repository. Provider CLIs are child process
 - Opaque or encrypted reasoning fields are stripped. Reasoning is stored only when the provider exposes a displayable summary.
 - External logs never claim reproducibility when the provider omits full context; unavailable context is recorded explicitly in the snapshot.
 - Runtime writes are disabled unless a run explicitly enables them.
+- Cancelling a managed run preserves its partial output and records `cancelled`, including after its process closes. It does not undo file changes. External sessions must be cancelled in their original tool.
+- Managed process groups receive SIGTERM on cancellation or server shutdown, then SIGKILL after five seconds if they have not closed. Shutdown waits for managed processes to close before closing SQLite. On Windows, signals target the child process rather than a POSIX process group.
+- This lifecycle includes runs still preparing telemetry and Copilot usage probes. Cancellation stops an active probe and prevents further probes; the runtime rejects new runs once shutdown begins.
 - The HTTP server binds to `127.0.0.1` and rejects unexpected Host headers.
 - Binding to loopback does not stop a web page from reaching the API through the browser, so cross-site fetch metadata and a mismatched `Origin` are rejected with 403 before every route. Non-`GET`/`HEAD` requests must also use `application/json`; routes that trigger synchronization or provider refreshes use `POST`.
 

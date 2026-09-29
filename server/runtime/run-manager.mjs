@@ -14,6 +14,7 @@ import { mergeCopilotUsage, parseCopilotUsageText, readCopilotOtelFile } from '.
 const MAX_OUTPUT = 250_000;
 const MAX_LINE = 1_000_000;
 const TIMEOUT_MS = 30 * 60 * 1000;
+const STOP_GRACE_MS = 5000;
 const COPILOT_INFO_TIMEOUT_MS = 15_000;
 
 function signal(child, value) {
@@ -23,8 +24,16 @@ function signal(child, value) {
   } catch { /* already stopped */ }
 }
 
+function stopProcess(state) {
+  if (!state.child || state.killTimer) return;
+  signal(state.child, 'SIGTERM');
+  state.killTimer = setTimeout(() => signal(state.child, 'SIGKILL'), STOP_GRACE_MS);
+  state.killTimer.unref?.();
+}
+
 export function createRunManager({ store, bus, repositories }) {
   const active = new Map();
+  let stopping = false;
   const copilotTelemetryDir = path.join(store.dataDir, 'copilot-otel');
   const persist = (run) => {
     run.updatedAt = new Date().toISOString();
@@ -52,6 +61,7 @@ export function createRunManager({ store, bus, repositories }) {
   };
 
   async function create(body, options = {}) {
+    if (stopping) throw new Error('The runtime is shutting down.');
     if (active.size >= 8) throw new Error('Maximum of 8 concurrent runs reached.');
     const adapter = adapterFor(body.provider);
     const repository = repositories.get(body.repositoryId);
@@ -99,29 +109,44 @@ export function createRunManager({ store, bus, repositories }) {
     persist(run);
     record(run, { type: 'agent.input', text: run.prompt });
     let child;
+    let timeout;
+    let resolveClosed;
+    const processState = {
+      child: null, run, killTimer: null,
+      closed: new Promise((resolve) => { resolveClosed = resolve; }),
+    };
+    const release = () => {
+      clearTimeout(timeout);
+      clearTimeout(processState.killTimer);
+      active.delete(run.id);
+      resolveClosed();
+    };
+    active.set(run.id, processState);
     let copilotTelemetryFile = null;
     const childEnv = { ...process.env, NO_COLOR: '1', PYTHONUNBUFFERED: '1' };
-    if (run.provider === 'copilot') {
-      await mkdir(copilotTelemetryDir, { recursive: true, mode: 0o700 });
-      copilotTelemetryFile = path.join(copilotTelemetryDir, `${run.id}.jsonl`);
-      childEnv.COPILOT_OTEL_ENABLED = 'true';
-      childEnv.COPILOT_OTEL_EXPORTER_TYPE = 'file';
-      childEnv.COPILOT_OTEL_FILE_EXPORTER_PATH = copilotTelemetryFile;
-      // Content capture remains disabled. The dashboard only needs OTel
-      // metadata, token counters and AI-unit usage.
-      delete childEnv.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT;
-    }
     try {
+      if (run.provider === 'copilot') {
+        await mkdir(copilotTelemetryDir, { recursive: true, mode: 0o700 });
+        copilotTelemetryFile = path.join(copilotTelemetryDir, `${run.id}.jsonl`);
+        childEnv.COPILOT_OTEL_ENABLED = 'true';
+        childEnv.COPILOT_OTEL_EXPORTER_TYPE = 'file';
+        childEnv.COPILOT_OTEL_FILE_EXPORTER_PATH = copilotTelemetryFile;
+        // Content capture remains disabled. The dashboard only needs OTel
+        // metadata, token counters and AI-unit usage.
+        delete childEnv.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT;
+      }
+      if (run.endedAt) { release(); return; }
       child = spawn(command.command, command.args, {
         cwd: run.repositoryPath, shell: false, detached: process.platform !== 'win32',
         env: childEnv, stdio: ['pipe', 'pipe', 'pipe'],
       });
+      processState.child = child;
     } catch (error) {
       finish(run, 'failed', error.message);
+      release();
       return;
     }
-    active.set(run.id, child);
-    const timeout = setTimeout(() => cancel(run.id, 'timeout'), TIMEOUT_MS);
+    timeout = setTimeout(() => cancel(run.id, 'timeout'), TIMEOUT_MS);
     timeout.unref?.();
     for (const channel of ['stdout', 'stderr']) consumeLines(child[channel], (line) => {
       const entry = adapter.parse(line, channel);
@@ -137,10 +162,15 @@ export function createRunManager({ store, bus, repositories }) {
     child.on('error', (error) => finish(run, 'failed', error.message));
     child.on('close', async (code, processSignal) => {
       clearTimeout(timeout);
-      active.delete(run.id);
-      if (run.status === 'cancelled') return;
-      if (run.provider === 'copilot') await updateCopilotUsage(run, adapter, command.command, copilotTelemetryFile, childEnv);
-      finish(run, code === 0 ? 'completed' : 'failed', `Process finished with ${code ?? processSignal}`);
+      clearTimeout(processState.killTimer);
+      processState.child = null;
+      try {
+        if (run.status === 'cancelled') return;
+        if (run.provider === 'copilot') await updateCopilotUsage(run, adapter, command.command, copilotTelemetryFile, childEnv);
+        finish(run, code === 0 ? 'completed' : 'failed', `Process finished with ${code ?? processSignal}`);
+      } finally {
+        release();
+      }
     });
   }
 
@@ -173,7 +203,8 @@ export function createRunManager({ store, bus, repositories }) {
   }
 
   function runCopilotInfoCommand(adapter, executable, run, prompt, inheritedEnv) {
-    if (!run.nativeSessionId) return Promise.resolve('');
+    const processState = active.get(run.id);
+    if (!run.nativeSessionId || !processState || stopping || run.status === 'cancelled') return Promise.resolve('');
     const info = adapter.build({
       prompt, model: run.model, sessionRef: run.nativeSessionId,
       allowWrites: false, allowShell: false,
@@ -190,18 +221,22 @@ export function createRunManager({ store, bus, repositories }) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(processState.killTimer);
+        processState.killTimer = null;
+        if (processState.child === child) processState.child = null;
         resolve(output.slice(-1_000_000));
       };
       try {
         child = spawn(executable || info.command, info.args, {
-          cwd: run.repositoryPath, shell: false, detached: false,
+          cwd: run.repositoryPath, shell: false, detached: process.platform !== 'win32',
           env, stdio: ['ignore', 'pipe', 'pipe'],
         });
+        processState.child = child;
       } catch { finishInfo(); return; }
       for (const stream of [child.stdout, child.stderr]) stream?.on('data', (chunk) => { output += chunk.toString('utf8'); });
       child.on('error', finishInfo);
       child.on('close', finishInfo);
-      timer = setTimeout(() => { child.kill('SIGTERM'); finishInfo(); }, COPILOT_INFO_TIMEOUT_MS);
+      timer = setTimeout(() => stopProcess(processState), COPILOT_INFO_TIMEOUT_MS);
       timer.unref?.();
     });
   }
@@ -224,7 +259,6 @@ export function createRunManager({ store, bus, repositories }) {
 
   function finish(run, status, text) {
     if (run.endedAt) return;
-    active.delete(run.id);
     run.status = status;
     run.endedAt = new Date().toISOString();
     const evaluator = evaluatorFor(run.evaluator?.id || 'manual');
@@ -234,14 +268,15 @@ export function createRunManager({ store, bus, repositories }) {
   }
 
   function cancel(id, reason = 'user') {
-    const run = store.getRun(id);
+    const processState = active.get(id);
+    const run = processState?.run || store.getRun(id);
     if (!run) throw new Error('Run not found.');
     if (run.origin === 'external') throw new Error('External sessions are read-only and must be cancelled from their source tool.');
-    const child = active.get(id);
-    if (!child) return run;
+    if (!processState || run.endedAt) return run;
     run.status = 'cancelled'; run.endedAt = new Date().toISOString();
-    signal(child, 'SIGTERM'); active.delete(id); persist(run);
+    persist(run);
     record(run, { type: 'agent.cancelled', text: `Cancelled: ${reason}` });
+    stopProcess(processState);
     return run;
   }
 
@@ -288,6 +323,11 @@ export function createRunManager({ store, bus, repositories }) {
   return {
     list: () => { const pricing = pricingFrom(store); return store.listRuns().map((run) => priceRun(run, pricing)); },
     get: (id) => store.getRun(id), detail, create, cancel, evaluate,
-    terminate() { for (const child of active.values()) signal(child, 'SIGTERM'); active.clear(); },
+    async terminate() {
+      stopping = true;
+      const processes = [...active.entries()];
+      for (const [id] of processes) cancel(id, 'shutdown');
+      await Promise.all(processes.map(([, state]) => state.closed));
+    },
   };
 }
