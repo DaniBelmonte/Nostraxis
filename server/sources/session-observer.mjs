@@ -550,7 +550,7 @@ export function createSessionObserver({
       try {
         await readTarget(target);
         if (target.format === 'vscode-chat') {
-          const result = await buildVscodeCopilotSnapshot(target.vscodeDocument, target.session.filename);
+          const result = await buildVscodeCopilotSnapshot(target.vscodeDocument, target.session.filename, new Date(now()).toISOString(), (await stat(target.session.filename)).mtimeMs);
           target.vscodeImportable = Boolean(result);
           if (!result) continue;
           const signature = JSON.stringify([result.snapshot, result.events]);

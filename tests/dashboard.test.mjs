@@ -390,6 +390,14 @@ test('VS Code Copilot Chat journals are reconstructed and imported with local wo
   assert.equal(recentPending.snapshot.endedAt, null);
   assert.equal(stalePending.snapshot.status, 'completed');
   assert.equal(stalePending.snapshot.endedAt, new Date(timestamp).toISOString());
+  const needsInput = { ...replayed, requests: replayed.requests.map((request) => ({ ...request, modelState: { value: 4 } })) };
+  const waiting = await buildVscodeCopilotSnapshot(needsInput, filename, new Date(timestamp + 10 * 60_000).toISOString());
+  assert.equal(waiting.snapshot.status, 'waiting');
+  assert.equal(waiting.snapshot.endedAt, null);
+  const working = { ...replayed, requests: replayed.requests.map((request) => ({ ...request, modelState: { value: 0 } })) };
+  const observed = timestamp + 3 * 60 * 60_000;
+  assert.equal((await buildVscodeCopilotSnapshot(working, filename, new Date(observed).toISOString())).snapshot.status, 'completed');
+  assert.equal((await buildVscodeCopilotSnapshot(working, filename, new Date(observed).toISOString(), observed - 1000)).snapshot.status, 'running');
   assert.deepEqual(defaultVscodeChatRoots({ platform: 'darwin', home: '/Users/test', env: {} }), [
     '/Users/test/Library/Application Support/Code/User/workspaceStorage',
     '/Users/test/Library/Application Support/Code - Insiders/User/workspaceStorage',
