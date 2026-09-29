@@ -685,3 +685,17 @@ test('managed Copilot runs enable and ingest isolated OpenTelemetry output', asy
     await rm(dir, { recursive: true });
   }
 });
+
+test('a Claude terminal session is named and prompted by the real prompt, not slash-command chatter', () => {
+  const session = newObservedSession('claude', 'cli.jsonl');
+  const ts = '2026-09-29T15:06:00.000Z';
+  for (const event of [
+    { type: 'user', isMeta: true, timestamp: ts, message: { content: '<local-command-caveat>Caveat: generated while running local commands</local-command-caveat>' } },
+    { type: 'user', timestamp: ts, message: { content: '<command-name>/model</command-name>\n<command-message>model</command-message>' } },
+    { type: 'user', timestamp: ts, message: { content: '<local-command-stdout>Set model</local-command-stdout>' } },
+    { type: 'user', timestamp: ts, message: { content: 'revisa los estados' } },
+    { type: 'ai-title', aiTitle: 'Estados de las sesiones' },
+  ]) consumeObservedEvent(session, event);
+  assert.equal(session.initialPrompt, 'revisa los estados');
+  assert.equal(session.title, 'Estados de las sesiones');
+});

@@ -239,10 +239,15 @@ export function consumeObservedEvent(session, event) {
       // A sidechain message is a subagent prompt and a meta message is injected
       // by the harness: neither is the person acting on the session.
       const userAction = event.isSidechain !== true && event.isMeta !== true;
-      session.task = textOf(value);
-      session.initialPrompt ||= session.task;
-      session.title ||= short(value, 80);
-      record(session, 'agent.input', at, { text: session.task, userAction });
+      const text = textOf(value);
+      // Slash-command echoes and their caveat are terminal chatter, not the prompt.
+      const chatter = event.isMeta === true || /^\s*<(?:command-name|command-message|local-command-)/.test(text);
+      if (!chatter) {
+        session.task = text;
+        session.initialPrompt ||= session.task;
+        session.title ||= short(value, 80);
+      }
+      record(session, 'agent.input', at, { text, userAction: userAction && !chatter });
       started(session, at);
     }
     if (event.type === 'assistant') {
@@ -271,7 +276,9 @@ export function consumeObservedEvent(session, event) {
     }
     if (event.type === 'system' && event.subtype === 'turn_duration') completed(session, at);
     if (event.type === 'result') event.is_error ? failed(session, at, 'The session reported an error') : completed(session, at);
-    if (event.type === 'custom-title' && typeof event.customTitle === 'string') session.title = short(event.customTitle, 80);
+    if (event.type === 'custom-title' && typeof event.customTitle === 'string') { session.title = short(event.customTitle, 80); session.titleLocked = true; }
+    if (event.type === 'ai-title' && typeof event.aiTitle === 'string' && !session.titleLocked) session.title = short(event.aiTitle, 80);
+    if (event.type === 'last-prompt' && typeof event.lastPrompt === 'string' && !session.initialPrompt) session.initialPrompt = session.task = event.lastPrompt;
   }
 
   if (session.provider === 'copilot') {
