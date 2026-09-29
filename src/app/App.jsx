@@ -29,6 +29,7 @@ export function App() {
   const [rawEvent, setRawEvent] = useState(null);
   const [actionError, setActionError] = useState('');
   const [contextPaneWidth, setContextPaneWidth] = useState(null);
+  const [sessionsPaneWidth, setSessionsPaneWidth] = useState(null);
   const shellRef = useRef(null);
 
   useEffect(() => {
@@ -47,24 +48,25 @@ export function App() {
     setActionError(message);
     setTimeout(() => setActionError(''), 5000);
   };
+  const measure = (selector, fallback) => shellRef.current?.querySelector(selector)?.getBoundingClientRect().width || fallback;
+  const minimumTraceWidth = () => (window.innerWidth > 1320 ? 480 : 420);
   const constrainContextPaneWidth = (width) => {
     const shell = shellRef.current;
     if (!shell) return Math.max(300, Math.min(760, width));
-    const railWidth = shell.querySelector('.app-rail')?.getBoundingClientRect().width || 68;
-    const sessionsWidth = shell.querySelector('.sessions-pane')?.getBoundingClientRect().width || 270;
-    const minimumTraceWidth = window.innerWidth > 1320 ? 480 : 420;
-    const maximum = Math.max(300, Math.min(760, shell.clientWidth - railWidth - sessionsWidth - minimumTraceWidth));
+    const maximum = Math.max(300, Math.min(760, shell.clientWidth - measure('.app-rail', 68) - measure('.sessions-pane', 270) - minimumTraceWidth()));
     return Math.max(300, Math.min(maximum, Math.round(width)));
   };
-  const resizeContextPane = (clientX) => {
+  const constrainSessionsPaneWidth = (width) => {
     const shell = shellRef.current;
-    if (!shell) return;
-    setContextPaneWidth(constrainContextPaneWidth(shell.getBoundingClientRect().right - clientX));
+    if (!shell) return Math.max(240, Math.min(560, width));
+    const contextWidth = window.innerWidth > 1080 ? measure('.context-pane', 392) : 0;
+    const maximum = Math.max(240, Math.min(560, shell.clientWidth - measure('.app-rail', 68) - contextWidth - minimumTraceWidth()));
+    return Math.max(240, Math.min(maximum, Math.round(width)));
   };
-  const startContextResize = (event) => {
-    if (window.innerWidth <= 1080) return;
+  const trackPaneResize = (event, minimumViewport, onMove) => {
+    if (window.innerWidth <= minimumViewport) return;
     event.preventDefault();
-    const move = (pointerEvent) => resizeContextPane(pointerEvent.clientX);
+    const move = (pointerEvent) => onMove(pointerEvent.clientX);
     const stop = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
@@ -72,17 +74,27 @@ export function App() {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop, { once: true });
   };
-  const adjustContextPane = (amount) => {
-    const measuredWidth = shellRef.current?.querySelector('.context-pane')?.getBoundingClientRect().width || 392;
-    setContextPaneWidth((current) => constrainContextPaneWidth((current ?? measuredWidth) + amount));
+  const startContextResize = (event) => trackPaneResize(event, 1080, (clientX) => {
+    const shell = shellRef.current;
+    if (shell) setContextPaneWidth(constrainContextPaneWidth(shell.getBoundingClientRect().right - clientX));
+  });
+  const startSessionsResize = (event) => trackPaneResize(event, 820, (clientX) => {
+    const left = shellRef.current?.querySelector('.sessions-pane')?.getBoundingClientRect().left;
+    if (left != null) setSessionsPaneWidth(constrainSessionsPaneWidth(clientX - left));
+  });
+  const adjustContextPane = (amount) => setContextPaneWidth((current) => constrainContextPaneWidth((current ?? measure('.context-pane', 392)) + amount));
+  const adjustSessionsPane = (amount) => setSessionsPaneWidth((current) => constrainSessionsPaneWidth((current ?? measure('.sessions-pane', 270)) + amount));
+  const paneWidths = {
+    ...(contextPaneWidth ? { '--context-pane-width': `${contextPaneWidth}px` } : {}),
+    ...(sessionsPaneWidth ? { '--sessions-pane-width': `${sessionsPaneWidth}px` } : {}),
   };
 
   if (!data) return <div className="boot-screen"><Robot weight="duotone" /><h1>Nostraxis</h1><p>{loadError || 'Starting local runtime, API and SQLite…'}</p></div>;
-  return <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={contextPaneWidth ? { '--context-pane-width': `${contextPaneWidth}px` } : undefined}>
+  return <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={paneWidths}>
     <AppRail active={activeNav} onChange={setActiveNav} online={!loadError} experimentsEnabled={data.features?.experiments === true} />
-    <ProviderUsageDock initial={data.providerUsage} />
+    <ProviderUsageDock initial={data.providerUsage} pricing={data.pricing} />
     {activeNav === 'Sessions' && <>
-      <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} />
+      <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} sessionsWidth={sessionsPaneWidth ?? 270} onResizeStart={startSessionsResize} onResizeKeyDown={adjustSessionsPane} />
       <MainTrace detail={detail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Repos')} />
       <ContextPane detail={detail} tab={contextTab} onTab={setContextTab} contextWidth={contextPaneWidth ?? 392} onResizeStart={startContextResize} onResizeKeyDown={adjustContextPane} />
     </>}
@@ -90,7 +102,7 @@ export function App() {
     {activeNav === 'Compare' && <CompareView runs={data.runs} focusId={selectedSession} onInspect={inspect} />}
     {data.features?.experiments === true && activeNav === 'R&D Lab' && <LabView data={data} reload={reload} setError={setError} />}
     {activeNav === 'Repos' && <RepositoriesView repositories={data.repositories} reload={reload} setError={setError} />}
-    {activeNav === 'Settings' && <SettingsView data={data} />}
+    {activeNav === 'Settings' && <SettingsView data={data} reload={reload} />}
 
     {actionError && <div className="toast-error"><WarningIcon />{actionError}<button onClick={() => setActionError('')}><X /></button></div>}
     {modal === 'new' && <Modal title="New session" onClose={() => setModal(null)}><NewRunForm data={data} onError={setError} onCreated={(run) => { setSelectedSession(run.id); setModal(null); reload(); }} /></Modal>}

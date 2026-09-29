@@ -7,7 +7,7 @@ export function SessionCard({ session, selected, onSelect }) {
     ? `${compact(metrics.total)} tok`
     : Number.isFinite(metrics.observedTokens) ? `${compact(metrics.observedTokens)} agent tok` : 'tok —';
   const billingLabel = Number.isFinite(metrics.credits)
-    ? `${credits(metrics.credits)} credits`
+    ? `${credits(metrics.credits)} credits${Number.isFinite(metrics.cost) ? ` · ${money(metrics.cost)}` : ''}`
     : Number.isFinite(metrics.cost) ? money(metrics.cost) : null;
   const workloadLabel = ({ interactive: 'Interactive', automation: 'Automation', messaging: 'Messaging' })[session.workload];
   const contextLabel = session.repositoryName && session.repositoryName !== 'No project'

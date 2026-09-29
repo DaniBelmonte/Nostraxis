@@ -390,6 +390,14 @@ test('VS Code Copilot Chat journals are reconstructed and imported with local wo
   assert.equal(recentPending.snapshot.endedAt, null);
   assert.equal(stalePending.snapshot.status, 'completed');
   assert.equal(stalePending.snapshot.endedAt, new Date(timestamp).toISOString());
+  const needsInput = { ...replayed, requests: replayed.requests.map((request) => ({ ...request, modelState: { value: 4 } })) };
+  const waiting = await buildVscodeCopilotSnapshot(needsInput, filename, new Date(timestamp + 10 * 60_000).toISOString());
+  assert.equal(waiting.snapshot.status, 'waiting');
+  assert.equal(waiting.snapshot.endedAt, null);
+  const working = { ...replayed, requests: replayed.requests.map((request) => ({ ...request, modelState: { value: 0 } })) };
+  const observed = timestamp + 3 * 60 * 60_000;
+  assert.equal((await buildVscodeCopilotSnapshot(working, filename, new Date(observed).toISOString())).snapshot.status, 'completed');
+  assert.equal((await buildVscodeCopilotSnapshot(working, filename, new Date(observed).toISOString(), observed - 1000)).snapshot.status, 'running');
   assert.deepEqual(defaultVscodeChatRoots({ platform: 'darwin', home: '/Users/test', env: {} }), [
     '/Users/test/Library/Application Support/Code/User/workspaceStorage',
     '/Users/test/Library/Application Support/Code - Insiders/User/workspaceStorage',
@@ -676,4 +684,18 @@ test('managed Copilot runs enable and ingest isolated OpenTelemetry output', asy
     else process.env.NOSTRAXIS_COPILOT_BIN = previousBinary;
     await rm(dir, { recursive: true });
   }
+});
+
+test('a Claude terminal session is named and prompted by the real prompt, not slash-command chatter', () => {
+  const session = newObservedSession('claude', 'cli.jsonl');
+  const ts = '2026-09-29T15:06:00.000Z';
+  for (const event of [
+    { type: 'user', isMeta: true, timestamp: ts, message: { content: '<local-command-caveat>Caveat: generated while running local commands</local-command-caveat>' } },
+    { type: 'user', timestamp: ts, message: { content: '<command-name>/model</command-name>\n<command-message>model</command-message>' } },
+    { type: 'user', timestamp: ts, message: { content: '<local-command-stdout>Set model</local-command-stdout>' } },
+    { type: 'user', timestamp: ts, message: { content: 'revisa los estados' } },
+    { type: 'ai-title', aiTitle: 'Estados de las sesiones' },
+  ]) consumeObservedEvent(session, event);
+  assert.equal(session.initialPrompt, 'revisa los estados');
+  assert.equal(session.title, 'Estados de las sesiones');
 });

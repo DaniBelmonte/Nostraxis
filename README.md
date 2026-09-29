@@ -201,9 +201,15 @@ The dashboard distinguishes three concepts that should not be confused:
 
 - **Subscription limit or quota:** counter and reset date provided by the provider.
 - **Provider credits:** provider-specific units, such as AI credits or Copilot premium requests. They are not dollars and are not comparable across providers.
-- **Estimated cost:** a USD amount computed only when you configure per-model prices and there are enough tokens. It does not replace the provider's bill.
+- **Estimated cost:** a USD amount computed only when you configure prices and there is enough usage to price. It does not replace the provider's bill.
 
-To enable estimated cost, define USD prices per million tokens before starting the server:
+Set prices in **Settings → Pricing**:
+
+- **GitHub AI credits plan** and **Legacy premium requests plan:** the subscription price in USD and the credits it includes. The price per credit is derived from them (for example, a hypothetical 300 USD plan with 30,000 AI credits gives 0.01 USD per credit). When GitHub reports the account quota, **Use account quota** fills in the included credits. Copilot sessions that report credits are priced in their own unit; the two units are never mixed or converted into each other.
+- **Copilot sessions priced by:** choose **Subscription credits** (credits reported by each session × the plan's price per credit) or **Model token prices** (the tokens of the model Copilot routes to, priced with the table below). The choice applies to every Copilot session, and the other basis is never used as a fallback.
+- **Model prices:** USD per million input, cached input and output tokens. Every observed model is listed; you can also add a model id before its first session. Cached input falls back to the input price when empty.
+
+Prices are stored in the local SQLite database and applied when sessions are read, so saving a price re-prices every session, its chart and the cost of each iteration in the timeline. A cost reported by the provider always takes precedence, and a session without a matching price keeps its cost unreported. `NOSTRAXIS_PRICING_JSON` still works as a base table; a model priced in Settings overrides it:
 
 ```bash
 export NOSTRAXIS_PRICING_JSON='{"model-id":{"inputPerMillion":1.25,"cachedInputPerMillion":0.25,"outputPerMillion":10}}'
@@ -250,7 +256,7 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | `COPILOT_HOME` | Copilot configuration and state directory. Nostraxis reads its `session-state` child when set. |
 | `NOSTRAXIS_COPILOT_TOKEN` | Short-lived token to query the personal Copilot quota if `gh auth login` is not used. Not stored. |
 | `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON` | JSON array of additional or custom VS Code `workspaceStorage` roots; replaces the platform defaults for this source. |
-| `NOSTRAXIS_PRICING_JSON` | Per-model price table to estimate USD. |
+| `NOSTRAXIS_PRICING_JSON` | Base per-model price table to estimate USD; prices saved in **Settings → Pricing** override it. |
 | `NOSTRAXIS_EXPERIMENTS_ENABLED=1` | Enables the R&D Lab and its experiments API. |
 | `NOSTRAXIS_SESSION_ROOTS_JSON` | Replaces the history locations that are watched. |
 | `NOSTRAXIS_SESSION_MAX_FILES` | Maximum number of history files inspected. |
@@ -265,7 +271,7 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | I do not see a VS Code Copilot chat | Check that **VS Code Copilot Chat** is detected in **Settings**. Stable and Insiders are automatic; remote, custom user-data and other editor installations require `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON`. |
 | The provider shows as unavailable | Check that its executable responds in the same Terminal you started the dashboard from. If it lives elsewhere, set the matching `*_BIN` variable. |
 | I cannot create a session | Register a repository in **Repos** first and select one in **New session**. The goal cannot be empty. |
-| No costs appear | Configure `NOSTRAXIS_PRICING_JSON`; without prices or reported tokens, cost stays unavailable. |
+| No costs appear | Set prices in **Settings → Pricing** (or `NOSTRAXIS_PRICING_JSON`); without prices or reported usage, cost stays unavailable. |
 | I do not see the Copilot quota | Run `gh auth login` with an account that has Copilot, or provide the temporary token to the process. Visibility depends on what GitHub exposes for your plan. |
 | Fields missing in Compare or Analytics | The dashboard does not fill in absent metrics. Check the session detail and compare only dimensions both sources reported. |
 

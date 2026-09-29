@@ -11,6 +11,11 @@ export const credits = (value) => Number.isFinite(value)
   ? value.toFixed(1)
   : '—';
 
+export const costSourceLabel = (source) => ({
+  provider: 'Reported by provider', demo: 'Demo data',
+  'configured-estimate': 'Model prices · Settings', 'configured-credits': 'Credit price · Settings',
+}[source] || (source ? source : 'Not reported'));
+
 export const percent = (value) => Number.isFinite(value)
   ? `${Math.round(value * 100)}%`
   : 'Not reported';
@@ -34,7 +39,7 @@ export const statusTone = (status) => status === 'running' || status === 'queued
   : status === 'completed' ? 'done' : 'warning';
 
 export const statusLabel = (status) => ({
-  running: 'Live', queued: 'Queued', completed: 'Completed', failed: 'Failed',
+  running: 'Live', waiting: 'Needs approval', queued: 'Queued', completed: 'Completed', failed: 'Failed',
   cancelled: 'Cancelled', stopped: 'Stopped', unknown: 'Unconfirmed', idle: 'Idle', draft: 'Draft',
 }[status] || status);
 

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { createSessionObserver, defaultSessionSources } from './session-observer.mjs';
 import { mergeCopilotUsage } from './copilot-otel.mjs';
-import { withEstimatedCost } from '../metrics/cost.mjs';
+import { withReportedCost } from '../metrics/cost.mjs';
 import { timingFromEvents, toIsoTimestamp } from '../core/timing.mjs';
 
 const eventKey = (runId, event) => createHash('sha256')
@@ -62,7 +62,7 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
     if (managed) {
       if (store.getRun(snapshot.id)) store.deleteRun(snapshot.id);
       if (snapshot.sourceKind === 'opentelemetry') {
-        managed.usage = withEstimatedCost(usageFor(managed, snapshot), snapshot.model || managed.model);
+        managed.usage = withReportedCost(usageFor(managed, snapshot));
         managed.usageScope = snapshot.usageScope || managed.usageScope;
         managed.model ||= snapshot.model || '';
         managed.updatedAt = [managed.updatedAt, snapshot.updatedAt].filter(Boolean).sort().at(-1);
@@ -94,7 +94,7 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
       startedAt: [existing?.startedAt, snapshot.startedAt].filter(Boolean).sort()[0],
       endedAt: snapshot.endedAt || existing?.endedAt || null,
       updatedAt: [existing?.updatedAt, snapshot.updatedAt].filter(Boolean).sort().at(-1),
-      usage: withEstimatedCost(usageFor(existing, snapshot), snapshot.model || existing?.model),
+      usage: withReportedCost(usageFor(existing, snapshot)),
       usageScope: snapshot.usageScope || existing?.usageScope,
       contextSnapshot: preserveExistingContext || {
         version: 1,

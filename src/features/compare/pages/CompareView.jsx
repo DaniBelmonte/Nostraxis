@@ -105,7 +105,7 @@ export function CompareView({ runs, focusId, onInspect }) {
       <button className={`toolbar-button ${moreOpen ? 'active' : ''}`} type="button" onClick={() => setMoreOpen((value) => !value)}><SlidersHorizontal /> More filters</button>
     </div>
     {moreOpen && <div className="compare-filters compare-filters-more">
-      <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{['All', 'running', 'queued', 'completed', 'failed', 'cancelled', 'stopped', 'idle', 'unknown'].map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{['All', 'running', 'waiting', 'queued', 'completed', 'failed', 'cancelled', 'stopped', 'idle', 'unknown'].map((value) => <option key={value}>{value}</option>)}</select></label>
     </div>}
     <div className="compare-runs-head">
       <h2>Runs <small>({sorted.length})</small></h2>

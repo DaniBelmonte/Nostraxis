@@ -6,7 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { adapterFor } from '../providers/index.mjs';
 import { evaluatorFor } from '../evaluators/index.mjs';
 import { materializeContext } from '../experiments/context.mjs';
-import { withEstimatedCost } from '../metrics/cost.mjs';
+import { priceEvents, priceRun, pricingFrom, withReportedCost } from '../metrics/cost.mjs';
 import { activityFor, validFileEvent } from '../metrics/observability.mjs';
 import { timingFromEvents } from '../core/timing.mjs';
 import { mergeCopilotUsage, parseCopilotUsageText, readCopilotOtelFile } from '../sources/copilot-otel.mjs';
@@ -128,7 +128,7 @@ export function createRunManager({ store, bus, repositories }) {
       const sessionRef = adapter.sessionRef?.(entry);
       if (sessionRef) run.nativeSessionId = sessionRef;
       if (entry.type === 'agent.output') run.response = `${run.response || ''}\n${entry.text || ''}`.trim().slice(-MAX_OUTPUT);
-      if (entry.usage) run.usage = withEstimatedCost(entry.usage, run.model);
+      if (entry.usage) run.usage = withReportedCost(entry.usage);
       record(run, entry);
       persist(run);
     });
@@ -162,7 +162,7 @@ export function createRunManager({ store, bus, repositories }) {
     }
     const usage = mergeCopilotUsage(telemetry?.usage || null, fallback);
     if (!usage) return;
-    run.usage = withEstimatedCost(usage, run.model);
+    run.usage = withReportedCost(usage);
     run.usageScope = telemetry ? 'session' : fallback?.input != null && fallback?.output != null ? 'session' : 'observed';
     record(run, {
       type: 'agent.usage',
@@ -281,11 +281,13 @@ export function createRunManager({ store, bus, repositories }) {
       }
     }
     const activity = activityFor(events);
-    return { run, events, timing: timingFromEvents(events), commands: activity.commands, warnings: activity.warnings, files: [...fileMap.values()].map(file => ({ ...file, tokens: file.tokens || null, sensitive: activity.warnings.some(w => w.target === file.path) })).sort((a, b) => b.reads + b.writes - a.reads - a.writes), tools: [...toolMap.values()].sort((a, b) => b.count - a.count) };
+    const pricing = pricingFrom(store);
+    return { run: priceRun(run, pricing), events: priceEvents(events, run, pricing), timing: timingFromEvents(events), commands: activity.commands, warnings: activity.warnings, files: [...fileMap.values()].map(file => ({ ...file, tokens: file.tokens || null, sensitive: activity.warnings.some(w => w.target === file.path) })).sort((a, b) => b.reads + b.writes - a.reads - a.writes), tools: [...toolMap.values()].sort((a, b) => b.count - a.count) };
   }
 
   return {
-    list: () => store.listRuns(), get: (id) => store.getRun(id), detail, create, cancel, evaluate,
+    list: () => { const pricing = pricingFrom(store); return store.listRuns().map((run) => priceRun(run, pricing)); },
+    get: (id) => store.getRun(id), detail, create, cancel, evaluate,
     terminate() { for (const child of active.values()) signal(child, 'SIGTERM'); active.clear(); },
   };
 }

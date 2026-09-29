@@ -7,13 +7,13 @@ import {
 import {
   Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { buildUsageChartPoints, compact, credits, duration, formatDate, metricsOf, money, paddedChartDomain, percent, statusLabel, statusTone } from '../../../shared/lib/metrics';
+import { buildUsageChartPoints, compact, costSourceLabel, credits, duration, formatDate, metricsOf, money, paddedChartDomain, percent, statusLabel, statusTone } from '../../../shared/lib/metrics';
 import { Conversation, CommandChart } from '../../../shared/components/Observability';
 import { FilterBar } from '../../../shared/components/FilterBar';
 import { SessionCard } from '../../../shared/components/SessionCard';
 import { api } from '../../../shared/api/client';
 
-export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync }) {
+export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync, sessionsWidth, onResizeStart, onResizeKeyDown }) {
   const [scope, setScope] = useState('all');
   const [groupMode, setGroupMode] = useState('project');
   const [query, setQuery] = useState('');
@@ -27,14 +27,16 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
     setFilters((current) => current.workload === 'All' ? current : { ...current, workload: 'All' });
     setGroupMode((current) => current === 'workload' ? 'project' : current);
   }, [isHermesSelected]);
-  const category = (run) => run.status === 'running' || run.status === 'queued' ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
+  // A session waiting for approval is still live: it sits in Live and also needs attention.
+  const category = (run) => ['running', 'queued', 'waiting'].includes(run.status) ? 'live' : run.status === 'completed' ? 'completed' : 'attention';
+  const inScope = (run, id) => category(run) === id || (id === 'attention' && run.status === 'waiting');
   const counts = useMemo(() => ({
-    live: runs.filter((run) => category(run) === 'live').length,
-    attention: runs.filter((run) => category(run) === 'attention').length,
-    completed: runs.filter((run) => category(run) === 'completed').length,
+    live: runs.filter((run) => inScope(run, 'live')).length,
+    attention: runs.filter((run) => inScope(run, 'attention')).length,
+    completed: runs.filter((run) => inScope(run, 'completed')).length,
   }), [runs]);
   const groups = useMemo(() => {
-    const scoped = scope === 'all' ? runs : runs.filter((run) => category(run) === scope);
+    const scoped = scope === 'all' ? runs : runs.filter((run) => inScope(run, scope));
     if (groupMode === 'project') {
       return [...new Set(scoped.map((run) => run.repositoryName || 'No project'))]
         .map((project) => ({
@@ -83,7 +85,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   ];
   const moreFilters = [
     ...(isHermesSelected ? [filterSelect('workload', 'Hermes type', options('workload'))] : []),
-    filterSelect('state', 'Status', ['All', 'running', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
+    filterSelect('state', 'Status', ['All', 'running', 'waiting', 'queued', 'idle', 'unknown', 'stopped', 'failed', 'cancelled', 'completed']),
     filterSelect('origin', 'Origin', ['All', 'External', 'Dashboard']),
     filterSelect('age', 'Updated', ['Any', '24 hours', '7 days', '30 days']),
     filterSelect('cost', 'Cost', ['Any', '> $1', '< $0.50']),
@@ -97,6 +99,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
   });
 
   return <aside className="sessions-pane">
+    <PaneResizeHandle className="sessions-resize-handle" label="Resize sessions panel" direction={1} min={240} max={560} width={sessionsWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />
     <div className="sessions-heading"><h1>Sessions</h1><div className="sessions-heading-actions"><button className="icon-button" onClick={sync} disabled={syncing} aria-label="Sync external sessions" title="Sync external sessions"><ArrowsClockwise className={syncing ? 'spinning' : ''} /></button><button className="secondary-button" onClick={onNewSession}>+ New session</button></div></div>
     <div className="session-tabs" role="tablist">{tabs.map(([id, label, count]) => <button key={id} className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{label} <span>{count}</span></button>)}</div>
     <div className="session-source-strip"><span><i className={availableSources.length ? 'online' : ''} />{externalSessionCount} external</span><small>{availableSources.length ? `${availableProviders.join(' · ')} live` : 'No local sources detected'}</small></div>
@@ -178,7 +181,7 @@ function TraceChart({ mode, detail }) {
   const seriesName = mode === 'cost' ? 'Cumulative cost' : 'Cumulative credits';
   const seriesColor = mode === 'tokens' ? '#79bfee' : mode === 'cost' ? '#70c5ac' : '#ffbc42';
   return <section className="trace-chart-panel" aria-label={`${label} over time`}>
-    <div className="chart-topbar"><div className="chart-legend">{mode === 'tokens' ? <><span><i style={{ background: '#70c5ac' }} />Context</span><span><i style={{ background: '#79bfee' }} />Input</span><span><i style={{ background: '#b680ff' }} />Output</span></> : <span><i style={{ background: seriesColor }} />{seriesName}</span>}<small>{isZeroFallback ? 'No provider usage reported · showing zero' : `${visiblePoints.length} measurements`}</small></div><ChartInspector point={inspectedPoint} mode={mode} /></div>
+    <div className="chart-topbar"><div className="chart-legend">{mode === 'tokens' ? <><span><i style={{ background: '#70c5ac' }} />Context</span><span><i style={{ background: '#79bfee' }} />Input</span><span><i style={{ background: '#b680ff' }} />Output</span></> : <span><i style={{ background: seriesColor }} />{seriesName}</span>}<small>{isZeroFallback ? (mode === 'cost' && points.length ? 'Usage reported but not priced · set prices in Settings' : 'No provider usage reported · showing zero') : `${visiblePoints.length} measurements`}</small></div><ChartInspector point={inspectedPoint} mode={mode} /></div>
     <div className="chart-wrap">
     <ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartPoints} margin={{ top: 12, right: 18, left: 4, bottom: 6 }} onMouseMove={(state) => setActivePoint(state?.activePayload?.[0]?.payload || null)} onMouseLeave={() => setActivePoint(null)}>
       <defs><linearGradient id="trace-chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={mode === 'tokens' ? '#79bfee' : seriesColor} stopOpacity={.45} /><stop offset="100%" stopColor={mode === 'tokens' ? '#79bfee' : seriesColor} stopOpacity={0} /></linearGradient></defs>
@@ -241,6 +244,14 @@ function EventStream({ events = [], paused, onRawEvent, runId }) {
   const shown = paused ? [] : events;
   const tokenTotal = [...events].reverse().find(e=>Number.isFinite(e.data?.usage?.input))?.data.usage.input;
   const costTotal = [...events].reverse().find(e=>Number.isFinite(e.data?.usage?.cost))?.data.usage.cost;
+  // Each priced measurement is cumulative; the step from the previous one is what that iteration cost.
+  const costSteps = new Map();
+  events.reduce((previous, event) => {
+    const cost = event.data?.usage?.cost;
+    if (!Number.isFinite(cost)) return previous;
+    if (previous != null && cost > previous) costSteps.set(event.id, cost - previous);
+    return cost;
+  }, null);
   return <div className="events-table">
     <div className="event-header"><span>Time</span><span>Type</span><span>Event</span><span>Input Σ / Δ</span><span>Cost Σ / Δ</span></div>
     <div className="event-body"><div className="phase">
@@ -250,7 +261,7 @@ function EventStream({ events = [], paused, onRawEvent, runId }) {
         <span className={`event-type event-type-${eventTypeTone(event.type)}`}>{eventIcon(event.type)}<code>{event.type.replace('agent.', '')}</code></span>
         <span>{eventText(event)}</span>
         <code>{event.data?.usage?.input != null ? 'Σ '+compact(event.data.usage.input) : event.data?.tokensDelta != null ? '+'+compact(event.data.tokensDelta) : '—'}</code>
-        <code>{event.data?.usage?.cost != null ? 'Σ '+money(event.data.usage.cost) : event.data?.costDelta != null ? '+'+money(event.data.costDelta) : '—'}</code>
+        <code title={costSteps.has(event.id) ? `This iteration: +${money(costSteps.get(event.id))}` : undefined}>{event.data?.usage?.cost != null ? <>{'Σ '+money(event.data.usage.cost)}{costSteps.has(event.id) && <small className="event-cost-step">+{money(costSteps.get(event.id))}</small>}</> : event.data?.costDelta != null ? '+'+money(event.data.costDelta) : '—'}</code>
       </button>)}
     </div></div>
   </div>;
@@ -282,7 +293,7 @@ export function MainTrace({ detail, hasRuns, paused, onPause, onCompare, onRawEv
     <section className="trace-summary">
       <div className="trace-summary-copy"><h2>{paused ? 'Visual stream paused' : eventText(lastEvent) || run.prompt} <span>· {duration(metrics.durationMs)}</span></h2></div>
       <div className="metric-switch"><button className={metric === 'tokens' ? 'active' : ''} onClick={() => setMetric('tokens')}>Tokens</button><button className={metric === 'cost' ? 'active' : ''} onClick={() => setMetric('cost')}>Cost</button>{Number.isFinite(metrics.credits) && <button className={metric === 'credits' ? 'active' : ''} onClick={() => setMetric('credits')}>Credits</button>}</div>
-      <div className="inline-metrics">{Number.isFinite(metrics.total) ? <><span><i className="dot blue" />Cumulative input<strong>{compact(metrics.input)}</strong></span><span><i className="dot purple" />Cumulative output<strong>{compact(metrics.output)}</strong></span></> : <><span><i className="dot blue" />Context in use<strong>{compact(metrics.contextTokens)}</strong></span><span><i className="dot purple" />Session total<strong>Not reported</strong></span></>}<span><i className="dot green" />{Number.isFinite(metrics.credits) ? metrics.creditUnit || 'Provider credits' : 'Cumulative cost'}<strong>{Number.isFinite(metrics.credits) ? credits(metrics.credits) : money(metrics.cost)}</strong></span></div>
+      <div className="inline-metrics">{Number.isFinite(metrics.total) ? <><span><i className="dot blue" />Cumulative input<strong>{compact(metrics.input)}</strong></span><span><i className="dot purple" />Cumulative output<strong>{compact(metrics.output)}</strong></span></> : <><span><i className="dot blue" />Context in use<strong>{compact(metrics.contextTokens)}</strong></span><span><i className="dot purple" />Session total<strong>Not reported</strong></span></>}<span><i className="dot green" />{Number.isFinite(metrics.credits) ? metrics.creditUnit || 'Provider credits' : 'Cumulative cost'}<strong>{Number.isFinite(metrics.credits) ? `${credits(metrics.credits)}${Number.isFinite(metrics.cost) ? ` · ${money(metrics.cost)}` : ''}` : money(metrics.cost)}</strong></span></div>
     </section>
     <TraceChart mode={metric} detail={detail} />
     <div className="detail-body"><div className="detail-tabs">{[['timeline','Timeline'],['conversation','Conversation'],['commands','Commands'],['warnings',`Warnings (${detail.warnings?.length || 0})`]].map(([id,label])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</div>{view==='timeline' && <EventStream events={events} paused={paused} onRawEvent={onRawEvent} runId={run.id} />}{view==='conversation' && <Conversation detail={detail} />}{view==='commands' && <CommandChart commands={detail.commands} />}{view==='warnings' && <div className="warning-list"><p>Heuristic rules for observed paths and commands. They do not prove data leakage.</p>{detail.warnings?.length ? detail.warnings.map((w,i)=><button key={i} onClick={()=>onRawEvent(events.find(e=>e.id===w.eventId))}><Warning /><span>{w.message}<code>{w.target}</code></span></button>) : <p>No matches with sensitivity rules were detected.</p>}</div>}</div>
@@ -343,19 +354,19 @@ function LoadedContext({ files, tools, run, snapshot }) {
   </section>;
 }
 
-function ContextResizeHandle({ width, onResizeStart, onResizeKeyDown }) {
+function PaneResizeHandle({ className, label, direction, min, max, width, onResizeStart, onResizeKeyDown }) {
   const onKeyDown = (event) => {
-    const adjustments = { ArrowLeft: 32, ArrowRight: -32, Home: -1000, End: 1000 };
+    const adjustments = { ArrowLeft: -32 * direction, ArrowRight: 32 * direction, Home: -1000, End: 1000 };
     if (!(event.key in adjustments)) return;
     event.preventDefault();
     onResizeKeyDown(adjustments[event.key]);
   };
-  return <div className="context-resize-handle" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin={300} aria-valuemax={760} aria-valuenow={Math.round(width)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={onKeyDown} />;
+  return <div className={`pane-resize-handle ${className}`} role="separator" aria-label={label} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(width)} tabIndex={0} onPointerDown={onResizeStart} onKeyDown={onKeyDown} />;
 }
 
 export function ContextPane({ detail, tab, onTab, contextWidth, onResizeStart, onResizeKeyDown }) {
   const [copied, setCopied] = useState(false);
-  const resizeHandle = <ContextResizeHandle width={contextWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />;
+  const resizeHandle = <PaneResizeHandle className="context-resize-handle" label="Resize context panel" direction={-1} min={300} max={760} width={contextWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />;
   if (!detail) return <aside className="context-pane">{resizeHandle}<div className="context-empty"><Database /><h3>No context captured</h3><p>The selected run's commit, prompts, files, tools and metrics will appear here.</p></div></aside>;
   const { run, files, tools } = detail;
   const metrics = metricsOf(run);
@@ -374,7 +385,7 @@ export function ContextPane({ detail, tab, onTab, contextWidth, onResizeStart, o
       </dl></section>
       <LoadedContext files={files} tools={tools} run={run} snapshot={snapshot} />
       <section className="context-section initial-prompt"><h3>Initial prompt</h3><details><summary>{(run.prompt || 'Not available in history').slice(0,180)}</summary><pre>{run.prompt || 'Not available'}</pre></details></section>
-      <section className="context-section"><h3>Token and credit usage</h3><dl className="usage-list"><dt>Input</dt><dd>{compact(metrics.input)}</dd><dt>Output</dt><dd>{compact(metrics.output)}</dd><dt>Session total</dt><dd>{Number.isFinite(metrics.total) ? compact(metrics.total) : 'Not reported'}</dd>{Number.isFinite(metrics.observedTokens) && <><dt>Included from agents</dt><dd>{compact(metrics.observedTokens)}</dd></>}{Number.isFinite(metrics.contextTokens) && <><dt>Context in use</dt><dd>{compact(metrics.contextTokens)}{Number.isFinite(metrics.contextWindowTokens) ? ` / ${compact(metrics.contextWindowTokens)}` : ''}</dd></>}</dl><dl className="usage-list compact"><dt>Cache hit rate</dt><dd>{percent(metrics.cacheHit)}</dd><dt>Estimated cost</dt><dd>{money(metrics.cost)}</dd><dt>Provider credits</dt><dd>{Number.isFinite(metrics.credits) ? `${credits(metrics.credits)} ${metrics.creditUnit || ''}` : 'Not reported'}</dd><dt>Source</dt><dd>{metrics.usageSource || 'Not reported'}</dd></dl>{metrics.creditCoverage === 'main-agent-only' && <p className="unavailable-note">OpenTelemetry did not attribute agent credits; the credit value covers the main agent only.</p>}{(metrics.total == null || metrics.cost == null || metrics.credits == null) && <p className="unavailable-note">Values not exposed by the provider remain unreported. The dashboard prioritises OpenTelemetry and only uses `/usage` or `/context` as fallback sources.</p>}</section>
+      <section className="context-section"><h3>Token and credit usage</h3><dl className="usage-list"><dt>Input</dt><dd>{compact(metrics.input)}</dd><dt>Output</dt><dd>{compact(metrics.output)}</dd><dt>Session total</dt><dd>{Number.isFinite(metrics.total) ? compact(metrics.total) : 'Not reported'}</dd>{Number.isFinite(metrics.observedTokens) && <><dt>Included from agents</dt><dd>{compact(metrics.observedTokens)}</dd></>}{Number.isFinite(metrics.contextTokens) && <><dt>Context in use</dt><dd>{compact(metrics.contextTokens)}{Number.isFinite(metrics.contextWindowTokens) ? ` / ${compact(metrics.contextWindowTokens)}` : ''}</dd></>}</dl><dl className="usage-list compact"><dt>Cache hit rate</dt><dd>{percent(metrics.cacheHit)}</dd><dt>Estimated cost</dt><dd>{money(metrics.cost)}</dd><dt>Cost source</dt><dd>{costSourceLabel(run.usage?.costSource)}</dd><dt>Provider credits</dt><dd>{Number.isFinite(metrics.credits) ? `${credits(metrics.credits)} ${metrics.creditUnit || ''}` : 'Not reported'}</dd><dt>Source</dt><dd>{metrics.usageSource || 'Not reported'}</dd></dl>{metrics.creditCoverage === 'main-agent-only' && <p className="unavailable-note">OpenTelemetry did not attribute agent credits; the credit value covers the main agent only.</p>}{(metrics.total == null || metrics.cost == null || metrics.credits == null) && <p className="unavailable-note">Values not exposed by the provider remain unreported. The dashboard prioritises OpenTelemetry and only uses `/usage` or `/context` as fallback sources.</p>}</section>
       {files.some((file) => file.reads > 1) && <section className="warning-callout"><Warning weight="fill" /><div><strong>Repeated reads detected</strong><p>{files.filter((file) => file.reads > 1).map((file) => `${file.path} ×${file.reads}`).join(', ')}. Review exclusions or retained context.</p></div></section>}
     </div>}
     {tab === 'metrics' && <div className="context-tab-panel"><header className="context-panel-heading"><ChartLine /><div><h3>Session metrics</h3><p>Reported values for this run.</p></div></header><dl className="context-metric-list"><dt>Session tokens</dt><dd>{compact(metrics.total)}</dd><dt>Observed agent tokens</dt><dd>{compact(metrics.observedTokens)}</dd><dt>Active time</dt><dd>{duration(metrics.durationMs)}</dd><dt>Conversation span</dt><dd>{duration(metrics.totalDurationMs)}</dd><dt>Last turn</dt><dd>{duration(metrics.lastTurnDurationMs)}</dd><dt>Cache hit</dt><dd>{percent(metrics.cacheHit)}</dd><dt>Provider credits</dt><dd>{Number.isFinite(metrics.credits) ? `${credits(metrics.credits)} ${metrics.creditUnit || ''}` : 'Not reported'}</dd><dt>Evaluation</dt><dd>{Number.isFinite(run.evaluation?.score) ? run.evaluation.score.toFixed(2) : 'Not reported'}</dd><dt>Reasoning tokens</dt><dd>{compact(run.usage?.reasoning)}</dd></dl></div>}

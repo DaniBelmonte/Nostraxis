@@ -24,6 +24,7 @@ export const api = {
   cancelRun: (id) => request(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   evaluateRun: (id, body) => request(`/api/runs/${encodeURIComponent(id)}/evaluation`, { method: 'POST', body: JSON.stringify(body) }),
   addRepository: (path) => request('/api/repositories', { method: 'POST', body: JSON.stringify({ path }) }),
+  savePricing: (body) => request('/api/settings/pricing', { method: 'PUT', body: JSON.stringify(body) }),
   syncSessions: () => request('/api/session-sources/sync', { method: 'POST' }),
   createExperiment: (body) => request('/api/experiments', { method: 'POST', body: JSON.stringify(body) }),
   experiment: (id) => request(`/api/experiments/${encodeURIComponent(id)}`),
