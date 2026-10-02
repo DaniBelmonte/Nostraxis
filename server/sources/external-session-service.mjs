@@ -1,54 +1,17 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { createSessionObserver, defaultSessionSources, observedSessionId } from './session-observer.mjs';
-import { mergeAgents, withMainAgent } from '../core/provider-details.mjs';
+import { createSessionObserver, defaultSessionSources } from './session-observer.mjs';
 import { mergeCopilotUsage } from './copilot-otel.mjs';
 import { withReportedCost } from '../metrics/cost.mjs';
 import { timingFromEvents, toIsoTimestamp } from '../core/timing.mjs';
 
-// Context occupancy, call ids and the subagent of an event were added after
-// sessions were already stored; leaving them out of the key keeps a re-read
-// log from storing those events twice.
-const keyData = ({ callId, agent, ...data } = {}) => {
-  if (!data.usage) return data;
-  const { contextTokens, contextWindowTokens, ...usage } = data.usage;
-  return { ...data, usage };
-};
-
 const eventKey = (runId, event) => createHash('sha256')
-  .update(`${runId}:${toIsoTimestamp(event.timestamp, event.timestamp)}:${event.type}:${JSON.stringify(keyData(event.data || {}))}`)
+  .update(`${runId}:${toIsoTimestamp(event.timestamp, event.timestamp)}:${event.type}:${JSON.stringify(event.data || {})}`)
   .digest('hex')
   .slice(0, 24);
 
-// The parent log measured only its own work, which is the main agent's.
-const withAgents = (details, provider, agents, run = {}) => {
-  if (!agents.length) return details || null;
-  const base = details || { provider, models: [], agents: [], requests: null };
-  const usage = run.usage || {};
-  return { ...base, agents: withMainAgent(mergeAgents(base.agents, agents), { model: run.model, input: usage.input, output: usage.output, cached: usage.cached, cacheWrite: usage.cacheWrite }) };
-};
-
-// A subagent log summarised as one agent of its parent run.
-const subagentOf = (snapshot) => ({
-  id: String(snapshot.nativeSessionId).split(':').pop(),
-  name: snapshot.name || null,
-  model: snapshot.model || null,
-  requests: snapshot.providerDetails?.requests ?? null,
-  input: snapshot.usage?.input ?? null, output: snapshot.usage?.output ?? null,
-  cached: snapshot.usage?.cached ?? null, cacheWrite: snapshot.usage?.cacheWrite ?? null,
-  tokens: Number.isFinite(snapshot.usage?.input) && Number.isFinite(snapshot.usage?.output) ? snapshot.usage.input + snapshot.usage.output : null,
-  source: 'subagent-log',
-});
-
 export function createExternalSessionService({ store, bus, repositories, roots, observerOptions = {} }) {
   let imported = 0;
-  const subagents = new Map();
-  // Subagent events wait for their parent run when its log is read later.
-  const pendingEvents = new Map();
-  const subagentsOf = (runId, existing) => mergeAgents(
-    (existing?.providerDetails?.agents || []).filter((agent) => agent.source === 'subagent-log'),
-    [...(subagents.get(runId)?.values() || [])],
-  );
 
   const usageFor = (existing, snapshot) => {
     if (!existing?.usage) return snapshot.usage;
@@ -92,25 +55,6 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
   };
 
   async function importSession(snapshot, observedEvents) {
-    if (snapshot.parentNativeSessionId) {
-      const parentId = observedSessionId(snapshot.provider, snapshot.parentNativeSessionId);
-      const agents = subagents.get(parentId) || new Map();
-      const agent = subagentOf(snapshot);
-      agents.set(agent.id, agent);
-      subagents.set(parentId, agents);
-      // Before subagents joined their parent, a subagent log was its own run.
-      if (store.getRun(snapshot.id)) store.deleteRun(snapshot.id);
-      const parent = store.getRun(parentId);
-      if (!parent) {
-        pendingEvents.set(parentId, [...(pendingEvents.get(parentId) || []), ...observedEvents].slice(-5000));
-        return null;
-      }
-      parent.providerDetails = withAgents(parent.providerDetails, parent.provider, subagentsOf(parentId, parent), parent);
-      store.saveRun(parent);
-      saveEvents(parent, observedEvents, 'external-session-log');
-      bus.publish({ kind: 'run', run: parent });
-      return parent;
-    }
     const managed = store.listRuns().find((run) => run.origin !== 'external'
       && run.provider === snapshot.provider
       && run.nativeSessionId
@@ -121,7 +65,6 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
         managed.usage = withReportedCost(usageFor(managed, snapshot));
         managed.usageScope = snapshot.usageScope || managed.usageScope;
         managed.model ||= snapshot.model || '';
-        managed.providerDetails = snapshot.providerDetails || managed.providerDetails || null;
         managed.updatedAt = [managed.updatedAt, snapshot.updatedAt].filter(Boolean).sort().at(-1);
         store.saveRun(managed);
         saveEvents(managed, observedEvents, 'copilot-opentelemetry');
@@ -153,7 +96,6 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
       updatedAt: [existing?.updatedAt, snapshot.updatedAt].filter(Boolean).sort().at(-1),
       usage: withReportedCost(usageFor(existing, snapshot)),
       usageScope: snapshot.usageScope || existing?.usageScope,
-      providerDetails: withAgents(snapshot.providerDetails || existing?.providerDetails || null, snapshot.provider, subagentsOf(snapshot.id, existing), snapshot),
       contextSnapshot: preserveExistingContext || {
         version: 1,
         strategy: 'provider-session-log',
@@ -190,10 +132,6 @@ export function createExternalSessionService({ store, bus, repositories, roots, 
       : snapshot.sourceKind === 'vscode-chat' ? 'vscode-copilot-chat'
         : 'external-session-log';
     saveEvents(run, additions, eventSource);
-    if (pendingEvents.has(run.id)) {
-      saveEvents(run, pendingEvents.get(run.id), eventSource);
-      pendingEvents.delete(run.id);
-    }
     applyObservedTiming(run, snapshot);
     imported = store.listRuns().filter((item) => item.origin === 'external').length;
     bus.publish({ kind: 'run', run });

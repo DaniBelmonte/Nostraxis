@@ -1,4 +1,4 @@
-import { Clock, FileText, FolderSimple, Terminal, Trash } from '@phosphor-icons/react';
+import { Clock, FileText, FolderSimple, Terminal } from '@phosphor-icons/react';
 import { AgentIcon, PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 import { compact, duration, metricsOf } from '../../../shared/lib/metrics';
 
@@ -12,21 +12,21 @@ export const cardDate = (value) => {
   };
 };
 
-export function RunCard({ run, selected, color, disabled, onToggle, onOpen, onRemove }) {
+export function RunCard({ run, selected, disabled, onToggle, onOpen }) {
   const metrics = metricsOf(run);
   const { day, time } = cardDate(run.startedAt);
   const tokenLabel = Number.isFinite(metrics.total) ? compact(metrics.total) : Number.isFinite(metrics.observedTokens) ? `${compact(metrics.observedTokens)}*` : '—';
-  const subtitle = <small>{run.model || 'auto'} · {run.repositoryName || 'no project'}{run.imported && <em className="source-badge">Imported</em>}</small>;
-  return <article className={`run-card ${selected ? 'selected' : ''}`} style={color ? { borderLeftColor: color } : undefined}>
+  return <article className={`run-card ${selected ? 'selected' : ''}`}>
     <label className="run-card-check">
       <input type="checkbox" checked={selected} disabled={!selected && disabled} onChange={() => onToggle(run.id)} aria-label={selected ? `Remove ${run.name} from comparison` : `Add ${run.name} to comparison`} />
     </label>
     <header className="run-card-head">
       <span className={`agent-icon provider-${run.provider}`} title={PROVIDER_NAMES[run.provider] || run.provider}><AgentIcon id={run.provider} /></span>
-      {onOpen
-        ? <button className="run-card-title" type="button" onClick={() => onOpen(run.id)}><strong title={run.name}>{run.name}</strong>{subtitle}</button>
-        : <div className="run-card-title" title={run.sourceName ? `Imported from ${run.sourceName}` : undefined}><strong title={run.name}>{run.name}</strong>{subtitle}</div>}
-      <span className="run-card-date"><strong>{day}</strong><small>{time}</small>{onRemove && <button type="button" className="icon-button run-card-remove" aria-label={`Delete imported run ${run.name}`} title="Delete this import" onClick={onRemove}><Trash /></button>}</span>
+      <button className="run-card-title" type="button" onClick={() => onOpen(run.id)}>
+        <strong title={run.name}>{run.name}</strong>
+        <small>{run.model || 'auto'} · {run.repositoryName || 'no project'}</small>
+      </button>
+      <span className="run-card-date"><strong>{day}</strong><small>{time}</small></span>
     </header>
     <div className="run-card-stats">
       <span title="Tokens"><FileText /><strong>{tokenLabel}</strong><small>tokens</small></span>
