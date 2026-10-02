@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS runs(
   usage_scope TEXT,
   active_duration_ms INTEGER,
   last_turn_ms INTEGER,
+  provider_details_json TEXT,
   FOREIGN KEY(repository_id) REFERENCES repositories(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS runs_dimensions ON runs(repository_id, provider, model, started_at);
@@ -83,6 +84,15 @@ CREATE TABLE IF NOT EXISTS experiment_variants(
   FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS variants_experiment ON experiment_variants(experiment_id);
+CREATE TABLE IF NOT EXISTS imported_runs(
+  id TEXT PRIMARY KEY,
+  source_name TEXT,
+  imported_at TEXT NOT NULL,
+  exported_at TEXT,
+  schema_version TEXT,
+  run_json TEXT NOT NULL,
+  events_json TEXT NOT NULL
+);
 `;
 
 const parse = (value, fallback = null) => {
@@ -120,6 +130,15 @@ const runFromRow = (row) => row ? ({
   usageScope: row.usage_scope || null,
   activeDurationMs: Number.isFinite(row.active_duration_ms) ? row.active_duration_ms : null,
   lastTurnDurationMs: Number.isFinite(row.last_turn_ms) ? row.last_turn_ms : null,
+  providerDetails: parse(row.provider_details_json),
+}) : null;
+
+// Runs imported from another Nostraxis export are kept apart from the local
+// runs, so they are compared without entering local sessions or analytics.
+const importFromRow = (row, withEvents = false) => row ? ({
+  id: row.id, sourceName: row.source_name, importedAt: row.imported_at, exportedAt: row.exported_at,
+  schemaVersion: row.schema_version, run: parse(row.run_json, {}),
+  ...(withEvents ? { events: parse(row.events_json, []) } : {}),
 }) : null;
 
 const repositoryFromRow = (row) => row ? ({ id: row.id, name: row.name, path: row.path, branch: row.branch, headSha: row.head_sha, createdAt: row.created_at }) : null;
@@ -183,6 +202,7 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
   if (!runColumns.has('usage_scope')) db.exec('ALTER TABLE runs ADD COLUMN usage_scope TEXT');
   if (!runColumns.has('active_duration_ms')) db.exec('ALTER TABLE runs ADD COLUMN active_duration_ms INTEGER');
   if (!runColumns.has('last_turn_ms')) db.exec('ALTER TABLE runs ADD COLUMN last_turn_ms INTEGER');
+  if (!runColumns.has('provider_details_json')) db.exec('ALTER TABLE runs ADD COLUMN provider_details_json TEXT');
   repairTimestamps(db);
   recomputeRunTiming(db);
   const statements = {
@@ -192,6 +212,8 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     listEvents: db.prepare('SELECT * FROM events WHERE run_id=? ORDER BY timestamp, id'),
     insertEvent: db.prepare('INSERT INTO events(run_id,timestamp,type,provider,data) VALUES (?,?,?,?,?)'),
     listRepositories: db.prepare('SELECT * FROM repositories ORDER BY name'),
+    listImports: db.prepare('SELECT id,source_name,imported_at,exported_at,schema_version,run_json FROM imported_runs ORDER BY imported_at DESC'),
+    getImport: db.prepare('SELECT * FROM imported_runs WHERE id=?'),
     getRepository: db.prepare('SELECT * FROM repositories WHERE id=?'),
     listExperiments: db.prepare('SELECT * FROM experiments ORDER BY created_at DESC'),
     getExperiment: db.prepare('SELECT * FROM experiments WHERE id=?'),
@@ -230,8 +252,8 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
         id,name,repository_id,repository_name,repository_path,provider,model,status,prompt,response,
         native_session_id,started_at,ended_at,updated_at,usage_json,context_snapshot_json,
         evaluation_json,permissions_json,experiment_id,demo,origin,source_path,source_kind,workload,
-        usage_scope,active_duration_ms,last_turn_ms
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        usage_scope,active_duration_ms,last_turn_ms,provider_details_json
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, repository_id=excluded.repository_id,
         repository_name=excluded.repository_name, repository_path=excluded.repository_path,
@@ -244,7 +266,8 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
         experiment_id=excluded.experiment_id, demo=excluded.demo, origin=excluded.origin,
         source_path=excluded.source_path, source_kind=excluded.source_kind,
         workload=excluded.workload, usage_scope=excluded.usage_scope,
-        active_duration_ms=excluded.active_duration_ms, last_turn_ms=excluded.last_turn_ms`).run(
+        active_duration_ms=excluded.active_duration_ms, last_turn_ms=excluded.last_turn_ms,
+        provider_details_json=excluded.provider_details_json`).run(
         run.id, run.name, run.repositoryId || null, run.repositoryName || null,
         run.repositoryPath, run.provider, run.model || null, run.status, run.prompt || '',
         run.response || null, run.nativeSessionId || null, toIsoTimestamp(run.startedAt, run.startedAt),
@@ -256,6 +279,7 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
         run.workload || null, run.usageScope || null,
         Number.isFinite(run.activeDurationMs) ? run.activeDurationMs : null,
         Number.isFinite(run.lastTurnDurationMs) ? run.lastTurnDurationMs : null,
+        run.providerDetails ? JSON.stringify(run.providerDetails) : null,
       );
       return run;
     },
@@ -271,6 +295,15 @@ export function openDatabase(dataDir = path.resolve('.nostraxis')) {
     eventsFor(runId) {
       return normalizeEvents(statements.listEvents.all(runId).map((row) => ({ id: row.id, runId: row.run_id, timestamp: row.timestamp, type: row.type, provider: row.provider, data: parse(row.data, {}) })));
     },
+    listImports: () => statements.listImports.all().map((row) => importFromRow(row)),
+    getImport: (id) => importFromRow(statements.getImport.get(id), true),
+    saveImport(item) {
+      db.prepare(`INSERT OR REPLACE INTO imported_runs(id,source_name,imported_at,exported_at,schema_version,run_json,events_json)
+        VALUES (?,?,?,?,?,?,?)`).run(item.id, item.sourceName || null, item.importedAt, item.exportedAt || null,
+        item.schemaVersion || null, JSON.stringify(item.run), JSON.stringify(item.events || []));
+      return item;
+    },
+    deleteImport: (id) => db.prepare('DELETE FROM imported_runs WHERE id=?').run(id),
     listRepositories: () => statements.listRepositories.all().map(repositoryFromRow),
     getRepository: (id) => repositoryFromRow(statements.getRepository.get(id)),
     saveRepository(repo) {

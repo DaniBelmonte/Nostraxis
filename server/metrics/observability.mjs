@@ -34,6 +34,36 @@ export function activityFor(events) {
   return { commands: [...commands].map(([name, count]) => ({ name, count })).sort((a,b) => b.count-a.count), files: [...files.values()], warnings };
 }
 
+// Files and tools of one run, as the session inspector and the comparison show them.
+export function eventActivity(events) {
+  const fileMap = new Map();
+  const toolMap = new Map();
+  for (const event of events) {
+    const data = event.data || {};
+    if (validFileEvent(event)) {
+      const found = fileMap.get(data.path) || { path: data.path, reads: 0, writes: 0, lastAt: event.timestamp, tokens: 0 };
+      if (event.type === 'agent.file_modified') found.writes++;
+      else found.reads++;
+      found.tokens += Number(data.tokensDelta || data.usage?.input || 0);
+      found.lastAt = event.timestamp;
+      fileMap.set(data.path, found);
+    }
+    const observedTool = data.tool || data.command || (event.type.includes('command') ? data.text : null);
+    if (observedTool) {
+      const found = toolMap.get(observedTool) || { name: observedTool, count: 0, failures: 0 };
+      if (!event.type.endsWith('completed')) found.count++;
+      if (event.type === 'agent.error' || (data.exitCode != null && data.exitCode !== 0)) found.failures++;
+      toolMap.set(observedTool, found);
+    }
+  }
+  const activity = activityFor(events);
+  return {
+    commands: activity.commands, warnings: activity.warnings,
+    files: [...fileMap.values()].map(file => ({ ...file, tokens: file.tokens || null, sensitive: activity.warnings.some(w => w.target === file.path) })).sort((a, b) => b.reads + b.writes - a.reads - a.writes),
+    tools: [...toolMap.values()].sort((a, b) => b.count - a.count),
+  };
+}
+
 // Command families are a presentation-neutral grouping of the observed command
 // name; anything we do not recognise stays 'other' instead of being guessed.
 const COMMAND_CATEGORIES = [

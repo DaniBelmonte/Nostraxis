@@ -1,6 +1,7 @@
 import { runDurationMs, timingFromEvents, totalSpanMs } from '../core/timing.mjs';
 
-export const runExportSchemaVersion = '1.0';
+// 1.1 adds run.providerDetails and usage.cacheWrite; readers of 1.0 ignore them.
+export const runExportSchemaVersion = '1.1';
 
 const finiteOrNull = (value) => Number.isFinite(value) ? value : null;
 
