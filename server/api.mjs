@@ -213,6 +213,6 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
       }
       return true;
     },
-    async close() { runs.terminate(); await externalSessions.close(); store.close(); },
+    async close() { await runs.terminate(); await externalSessions.close(); store.close(); },
   };
 }
