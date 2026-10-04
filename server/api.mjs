@@ -4,12 +4,14 @@ import { createRepositoryService } from './repositories/service.mjs';
 import { createRunManager } from './runtime/run-manager.mjs';
 import { createExperimentService } from './experiments/service.mjs';
 import { detectProviders } from './providers/index.mjs';
-import { buildAnalytics, compareRuns, metricDefinitions, matches } from './metrics/analytics.mjs';
+import { buildAnalytics, metricDefinitions, matches } from './metrics/analytics.mjs';
 import { buildObservability } from './metrics/observability.mjs';
 import { createExternalSessionService } from './sources/external-session-service.mjs';
 import { createProviderUsageService } from './sources/provider-usage.mjs';
 import { chooseRepositoryFolder } from './repositories/picker.mjs';
 import { buildRunJsonl, runExportFilename } from './exports/run-jsonl.mjs';
+import { MAX_IMPORT_BYTES } from './exports/run-import.mjs';
+import { createComparisonService } from './comparison/service.mjs';
 import { PRICING_SETTING, environmentPricedModels, normalizePricing, savedPricing } from './metrics/cost.mjs';
 
 const json = (res, status, value) => {
@@ -18,13 +20,17 @@ const json = (res, status, value) => {
   res.end(body);
 };
 
-async function readBody(req) {
-  let body = '';
+async function readBody(req, limit = 1_000_000) {
+  // Chunks are joined before decoding so a character split between two chunks
+  // survives large bodies.
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    body += chunk;
-    if (body.length > 1_000_000) throw new Error('Request body exceeds 1 MB.');
+    size += chunk.length;
+    if (size > limit) throw new Error(`Request body exceeds ${Math.round(limit / 1_000_000)} MB.`);
+    chunks.push(Buffer.from(chunk));
   }
-  return JSON.parse(body || '{}');
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
 const safeMethod = (method) => method === 'GET' || method === 'HEAD';
@@ -62,6 +68,7 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
   const repositories = createRepositoryService(store);
   const runs = createRunManager({ store, bus, repositories });
   const experiments = createExperimentService({ store, repositories, runs });
+  const comparison = createComparisonService({ store, runs });
   const externalSessions = createExternalSessionService({ store, bus, repositories });
   void externalSessions.start()
     .then(() => bus.publish({ kind: 'sources', ...externalSessions.status() }))
@@ -182,13 +189,22 @@ export function createApi({ dataDir, experimentsEnabled = process.env.NOSTRAXIS_
         }
         if (req.method === 'GET' && route === '/api/compare') {
           const ids = (url.searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 12);
-          const selected = ids.map((id) => {
-            try {
-              const detail = runs.detail(id);
-              return { ...detail.run, files: detail.files, tools: detail.tools };
-            } catch { return null; }
-          }).filter(Boolean);
-          json(res, 200, compareRuns(selected)); return true;
+          json(res, 200, comparison.compare(ids)); return true;
+        }
+        const annotationId = matchId(route, '/api/compare/annotations/');
+        if (req.method === 'PUT' && annotationId) {
+          json(res, 200, { annotation: comparison.annotate(annotationId, await readBody(req)) }); return true;
+        }
+        if (req.method === 'GET' && route === '/api/imports') {
+          json(res, 200, comparison.listImports()); return true;
+        }
+        if (req.method === 'POST' && route === '/api/imports') {
+          // JSON escaping can grow the file, so the body may exceed the file limit.
+          json(res, 201, comparison.importRun(await readBody(req, MAX_IMPORT_BYTES * 2))); return true;
+        }
+        const importId = matchId(route, '/api/imports/');
+        if (req.method === 'DELETE' && importId) {
+          json(res, 200, comparison.deleteImport(importId)); return true;
         }
         if (experimentsEnabled && req.method === 'GET' && route === '/api/experiments') {
           json(res, 200, experiments.list()); return true;

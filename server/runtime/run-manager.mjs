@@ -7,7 +7,7 @@ import { adapterFor } from '../providers/index.mjs';
 import { evaluatorFor } from '../evaluators/index.mjs';
 import { materializeContext } from '../experiments/context.mjs';
 import { priceEvents, priceRun, pricingFrom, withReportedCost } from '../metrics/cost.mjs';
-import { activityFor, validFileEvent } from '../metrics/observability.mjs';
+import { eventActivity } from '../metrics/observability.mjs';
 import { timingFromEvents } from '../core/timing.mjs';
 import { mergeCopilotUsage, parseCopilotUsageText, readCopilotOtelFile } from '../sources/copilot-otel.mjs';
 
@@ -45,6 +45,7 @@ export function createRunManager({ store, bus, repositories }) {
         text: entry.text || '', channel: entry.channel || null, tool: entry.tool || null,
         path: entry.path || null, command: entry.command || null, exitCode: entry.exitCode ?? null,
         usage: entry.usage || null, raw: entry.data || null,
+        ...(entry.callId ? { callId: entry.callId } : {}), ...(entry.status ? { status: entry.status } : {}),
       },
     });
     bus.publish({ kind: 'event', event });
@@ -129,6 +130,7 @@ export function createRunManager({ store, bus, repositories }) {
       if (sessionRef) run.nativeSessionId = sessionRef;
       if (entry.type === 'agent.output') run.response = `${run.response || ''}\n${entry.text || ''}`.trim().slice(-MAX_OUTPUT);
       if (entry.usage) run.usage = withReportedCost(entry.usage);
+      if (entry.providerDetails) run.providerDetails = entry.providerDetails;
       record(run, entry);
       persist(run);
     });
@@ -150,6 +152,7 @@ export function createRunManager({ store, bus, repositories }) {
       || (summaries.length === 1 ? summaries[0] : null);
     if (telemetry?.conversationId && !run.nativeSessionId) run.nativeSessionId = telemetry.conversationId;
     if (telemetry?.model && !run.model) run.model = telemetry.model;
+    if (telemetry?.providerDetails) run.providerDetails = telemetry.providerDetails;
 
     let fallback = null;
     if (!telemetry || telemetry.usage.creditCoverage === 'main-agent-only') {
@@ -259,30 +262,8 @@ export function createRunManager({ store, bus, repositories }) {
     const run = store.getRun(id);
     if (!run) throw new Error('Run not found.');
     const events = store.eventsFor(id);
-    const fileMap = new Map();
-    const toolMap = new Map();
-    for (const event of events) {
-      const data = event.data || {};
-      if (validFileEvent(event)) {
-        const found = fileMap.get(data.path) || { path: data.path, reads: 0, writes: 0, lastAt: event.timestamp, tokens: 0 };
-        if (event.type === 'agent.file_modified') found.writes++;
-        else found.reads++;
-        found.tokens += Number(data.tokensDelta || data.usage?.input || 0);
-        found.lastAt = event.timestamp;
-        fileMap.set(data.path, found);
-      }
-      const observedTool = data.tool || data.command || (event.type.includes('command') ? data.text : null);
-      if (observedTool) {
-        const key = observedTool;
-        const found = toolMap.get(key) || { name: key, count: 0, failures: 0 };
-        if (!event.type.endsWith('completed')) found.count++;
-        if (event.type === 'agent.error' || (data.exitCode != null && data.exitCode !== 0)) found.failures++;
-        toolMap.set(key, found);
-      }
-    }
-    const activity = activityFor(events);
     const pricing = pricingFrom(store);
-    return { run: priceRun(run, pricing), events: priceEvents(events, run, pricing), timing: timingFromEvents(events), commands: activity.commands, warnings: activity.warnings, files: [...fileMap.values()].map(file => ({ ...file, tokens: file.tokens || null, sensitive: activity.warnings.some(w => w.target === file.path) })).sort((a, b) => b.reads + b.writes - a.reads - a.writes), tools: [...toolMap.values()].sort((a, b) => b.count - a.count) };
+    return { run: priceRun(run, pricing), events: priceEvents(events, run, pricing), timing: timingFromEvents(events), ...eventActivity(events) };
   }
 
   return {

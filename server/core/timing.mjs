@@ -128,6 +128,20 @@ export function sessionTurns(events = []) {
   }));
 }
 
+// Active time elapsed when each event happened, by the same rule as the turns:
+// a gap counts unless it ends in a user action or exceeds MAX_WORK_GAP_MS. It
+// lets runs of different length be laid on one axis of working time.
+export function activeOffsets(events = []) {
+  let elapsed = 0, previous = null;
+  return events.map((event) => {
+    const at = Date.parse(event.timestamp || '');
+    if (!Number.isFinite(at)) return null;
+    if (previous != null && !isUserAction(event) && !IGNORED_TYPES.has(event.type) && at - previous <= MAX_WORK_GAP_MS) elapsed += Math.max(0, at - previous);
+    previous = at;
+    return elapsed;
+  });
+}
+
 export function timingFromEvents(events = []) {
   const normalized = normalizeEvents(events);
   const turns = sessionTurns(normalized);

@@ -1,3 +1,4 @@
+import { addAgentUsage, addModelUsage, providerDetails, withMainAgent } from '../core/provider-details.mjs';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -33,7 +34,8 @@ function containerAt(root, keys, create = false) {
 }
 
 // VS Code chatSessions files are append-only journals. Kind 0 initializes the
-// document, kind 1 replaces a value at `k`, and kind 2 appends values at `k`.
+// document, kind 1 replaces a value at `k`, and kind 2 appends values at `k`,
+// first truncating the array to `i` when the record carries it.
 export function applyVscodeChatRecord(document, record) {
   if (!record || !Number.isInteger(record.kind)) return document;
   if (record.kind === 0 && record.v && typeof record.v === 'object') return clone(record.v);
@@ -44,6 +46,7 @@ export function applyVscodeChatRecord(document, record) {
   if (record.kind === 1) parent[key] = clone(record.v);
   if (record.kind === 2) {
     if (!Array.isArray(parent[key])) parent[key] = [];
+    if (Number.isInteger(record.i) && record.i >= 0) parent[key].length = Math.min(record.i, parent[key].length);
     parent[key].push(...(Array.isArray(record.v) ? clone(record.v) : [clone(record.v)]));
   }
   return document;
@@ -128,6 +131,77 @@ function usageOf(requests) {
   };
 }
 
+const modelSlug = (value) => String(value || '').toLowerCase().replace(/^copilot\//, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+// The model a request ran on, named as it was picked: VS Code reports
+// `copilot/claude-sonnet-5.5` and resolves it to `claude-sonnet-5-5`; only a
+// different resolved model (auto routing) replaces the picked name.
+const requestModel = (request) => {
+  const picked = String(request.modelId || '').replace(/^copilot\//, '');
+  const resolved = request.result?.metadata?.resolvedModel;
+  return resolved && modelSlug(resolved) !== modelSlug(picked) ? resolved : picked || resolved || '';
+};
+
+// A journal can retain several states of the same invocation. Its last
+// serialized state is the best available record of that one call.
+function invocations(request) {
+  const calls = new Map();
+  (Array.isArray(request.response) ? request.response : []).forEach((item, index) => {
+    if (item?.kind === 'toolInvocationSerialized') calls.set(item.toolCallId || `response-${index}`, item);
+  });
+  return calls;
+}
+
+// Each runSubagent call is one agent and the calls it made carry its
+// subAgentInvocationId. VS Code reports a subagent's credits and model name,
+// not its tokens or duration; the request's credits include its subagents, its
+// tokens are the main agent's. A launch that never ran is not an agent.
+function agentDetails(requests) {
+  const agents = new Map();
+  let subagentCredits = 0, ownCalls = 0, rounds = null;
+  for (const request of requests) {
+    const calls = [...invocations(request).values()];
+    // The main agent's own calls are the ones no subagent made and its model
+    // calls the request's tool-call rounds. The request's elapsed time covers
+    // its subagents too, so it is not the main agent's time.
+    ownCalls += calls.filter((call) => !call.subAgentInvocationId).length;
+    const roundCount = request.result?.metadata?.toolCallRounds?.length;
+    if (finite(roundCount)) rounds = (rounds ?? 0) + roundCount;
+    const resolved = requestModel(request);
+    for (const item of calls.filter((call) => call.toolId === 'runSubagent')) {
+      const data = item.toolSpecificData || {};
+      const toolCalls = calls.filter((call) => call.subAgentInvocationId === item.toolCallId).length;
+      if (!data.result && !finite(data.credits) && !toolCalls) continue;
+      addAgentUsage(agents, item.toolCallId, {
+        name: short(data.description || data.agentName, 120) || null,
+        model: modelSlug(data.modelName) && modelSlug(data.modelName) === modelSlug(resolved) ? resolved : short(data.modelName, 200) || null,
+        toolCalls, ...(finite(data.credits) ? { credits: data.credits, creditUnit: 'AI credits' } : {}),
+        source: 'subagent-event',
+      });
+      if (finite(data.credits)) subagentCredits += data.credits;
+    }
+  }
+  const usage = usageOf(requests);
+  return withMainAgent(agents, {
+    model: requests.map(requestModel).filter(Boolean).at(-1),
+    requests: rounds, input: usage?.input, output: usage?.output, toolCalls: ownCalls,
+    ...(finite(usage?.credits) && usage.credits >= subagentCredits ? { credits: Number((usage.credits - subagentCredits).toFixed(6)), creditUnit: 'AI credits' } : {}),
+  });
+}
+
+// Under `copilot/auto` each request names the model it was routed to.
+function modelDetails(requests) {
+  const models = new Map();
+  for (const request of requests) {
+    if (![request.promptTokens, request.completionTokens, request.copilotCredits].some(finite)) continue;
+    addModelUsage(models, requestModel(request), {
+      requests: 1, input: request.promptTokens, output: request.completionTokens,
+      ...(finite(request.copilotCredits) ? { credits: request.copilotCredits, creditUnit: 'AI credits' } : {}),
+    });
+  }
+  return providerDetails('copilot', { models, agents: agentDetails(requests) });
+}
+
 function requestTimestamp(request, fallback) {
   return isoDate(request?.timestamp, fallback);
 }
@@ -145,14 +219,7 @@ function invocationPaths(item) {
 }
 
 function toolEvents(request, fallback) {
-  const response = Array.isArray(request.response) ? request.response : [];
-  // A journal can retain several states of the same invocation. Its last
-  // serialized state is the best available record of that one call.
-  const calls = new Map();
-  response.forEach((item, index) => {
-    if (item?.kind !== 'toolInvocationSerialized') return;
-    calls.set(item.toolCallId || `response-${index}`, item);
-  });
+  const calls = invocations(request);
   const events = [];
   for (const [toolCallId, item] of calls) {
     const tool = String(item.toolId || 'tool');
@@ -162,7 +229,8 @@ function toolEvents(request, fallback) {
       ? item.toolSpecificData.commandLine?.original || item.toolSpecificData.commandLine?.forDisplay || '' : '';
     const timestamp = isoDate(item.toolSpecificData?.terminalCommandState?.timestamp,
       responseTimestamp(request, fallback));
-    const base = { tool, toolCallId, text: command || message, source: 'vscode-chat' };
+    const base = { tool, toolCallId, text: command || message, source: 'vscode-chat',
+      ...(item.subAgentInvocationId ? { agent: item.subAgentInvocationId } : {}) };
     if (command) {
       events.push({ type: 'agent.command_started', timestamp, data: { ...base, command,
         exitCode: item.toolSpecificData?.terminalCommandState?.exitCode ?? null } });
@@ -249,6 +317,7 @@ export async function buildVscodeCopilotSnapshot(document, filename, fallbackTim
       updatedAt,
       status,
       usage,
+      providerDetails: modelDetails(requests),
       usageScope: usage ? 'session' : 'unavailable',
       sourcePath: filename,
       clipped: false,

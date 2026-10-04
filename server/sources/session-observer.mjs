@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { collectCopilotOtel } from './copilot-otel.mjs';
 import { applyVscodeChatRecord, buildVscodeCopilotSnapshot, defaultVscodeChatRoots } from './vscode-copilot-chat.mjs';
 import { readHermesSessions } from './hermes-sessions.mjs';
 import { toIsoTimestamp } from '../core/timing.mjs';
+import { addAgentUsage, addModelUsage, countInto, mergeAgents, providerDetails, withMainAgent } from '../core/provider-details.mjs';
 
 const MAX_RESPONSE = 250_000;
 const finite = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -33,11 +34,38 @@ export function observedSessionId(provider, nativeId) {
   return `external-${createHash('sha256').update(`${provider}:${nativeId}`).digest('hex').slice(0, 24)}`;
 }
 
+// Codex returns a tool's output as text or as JSON with its metadata.
+function codexExitCode(output) {
+  if (typeof output !== 'string') return finite(output?.metadata?.exit_code) ? output.metadata.exit_code : null;
+  try { const parsed = JSON.parse(output); if (finite(parsed?.metadata?.exit_code)) return parsed.metadata.exit_code; } catch { /* plain text output */ }
+  const match = output.match(/(?:Process exited with code|Exit code:?)\s*(\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
+// Accumulators for the provider details of one log; see provider-details.mjs.
+const newDetail = () => ({
+  models: new Map(), agents: new Map(), stopReasons: {}, cacheMisses: {}, abortReasons: {}, mcpServers: {},
+  failedTools: null, failedCommands: null, apiErrors: null, toolResults: null, serviceTiers: new Set(),
+  routing: [], modelChanges: [], turns: [], rateLimits: {}, policies: null, codeChanges: null,
+  compactionCost: null, contextBreakdown: null, premiumRequests: null, reportedCostUsd: null,
+  modelCosts: {}, apiDurationMs: null, apiDurationWithoutRetriesMs: null, permissionMode: null,
+  contextTier: null, plan: null, lastTotal: null, shutdownModels: null, shutdownAgents: null, seen: new Set(), spawns: new Map(),
+});
+const bump = (detail, field, amount = 1) => { detail[field] = (detail[field] ?? 0) + amount; };
+const once = (detail, key) => {
+  if (!key || detail.seen.has(key)) return false;
+  detail.seen.add(key);
+  return true;
+};
+const textValue = (value, limit = 80) => typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : null;
+
 export function newObservedSession(provider, filename, now = Date.now()) {
   return {
     provider, filename, nativeId: '', workspace: '', model: '', title: '', task: '', response: '',
     initialPrompt: '', reportedUserMessage: '', status: 'idle', startedAt: new Date(now).toISOString(), lastEventAt: null, endedAt: null,
     usage: null, usageScope: 'unavailable', messages: new Map(), subagentUsage: new Map(), events: [], clipped: false,
+    contextTokens: null, settingsKey: '', memoryPaths: new Set(), lastCompactionAt: null,
+    parentNativeId: null, detail: newDetail(), openCalls: new Map(), eventAgent: null, codexAgent: null, agentName: null,
   };
 }
 
@@ -107,9 +135,48 @@ function appendResponse(session, value, replace = false) {
   session.response = (replace ? text : `${session.response}\n${text}`.trim()).slice(-MAX_RESPONSE);
 }
 
+// Events of a subagent carry the agent they belong to, so the schedule can
+// draw its work beside the main agent.
 function record(session, type, at, data = {}) {
   session.lastEventAt = at;
-  session.events.push({ type, timestamp: at, data });
+  session.events.push({ type, timestamp: at, data: session.eventAgent && !data.agent ? { ...data, agent: session.eventAgent } : data });
+}
+
+// A finished tool call, paired with its start by the provider's call id.
+function toolDone(session, at, callId, failed) {
+  if (!callId || !session.openCalls.has(callId)) return;
+  const toolName = session.openCalls.get(callId);
+  session.openCalls.delete(callId);
+  record(session, 'agent.tool_completed', at, { text: `${toolName} ${failed ? 'failed' : 'finished'}`, tool: toolName, callId, status: failed ? 'failed' : 'completed' });
+}
+
+// Effort and reasoning settings are recorded only where the provider writes
+// them, and only when they change, so the trace shows the conditions of a turn.
+function modelSettings(session, at, settings) {
+  const next = Object.fromEntries(Object.entries(settings).filter(([, value]) => typeof value === 'string' && value.trim()).map(([key, value]) => [key, value.trim()]));
+  if (!next.effort && !next.reasoningSummary) return;
+  const key = JSON.stringify(next);
+  if (session.settingsKey === key) return;
+  session.settingsKey = key;
+  const label = [next.effort && `effort ${next.effort}`, next.reasoningSummary && `summary ${next.reasoningSummary}`].filter(Boolean).join(' · ');
+  record(session, 'agent.status_changed', at, { text: `Model settings · ${label}`, modelSettings: next });
+}
+
+function compaction(session, at, { trigger = null, preTokens = null } = {}) {
+  // Codex reports one compaction as both a rollout item and an event message.
+  if (session.lastCompactionAt && Math.abs(Date.parse(at) - Date.parse(session.lastCompactionAt)) < 10_000) return;
+  session.lastCompactionAt = at;
+  record(session, 'agent.status_changed', at, {
+    text: `Context compacted${trigger ? ` (${trigger})` : ''}`,
+    compaction: { trigger: typeof trigger === 'string' ? trigger : null, preTokens: finite(preTokens) ? preTokens : null },
+  });
+}
+
+// Instruction and memory files the provider injects without a tool call.
+function memoryLoaded(session, at, filePath) {
+  if (!filePath || session.memoryPaths.has(filePath)) return;
+  session.memoryPaths.add(filePath);
+  record(session, 'agent.status_changed', at, { text: `Instructions loaded · ${filePath}`, memory: { path: filePath, injected: true } });
 }
 
 function started(session, at) {
@@ -130,7 +197,7 @@ function failed(session, at, text) {
   record(session, 'agent.error', at, { text });
 }
 
-function tool(session, name, inputValue, at) {
+function tool(session, name, inputValue, at, callId = null) {
   let input = inputValue || {};
   if (typeof input === 'string') {
     try { input = JSON.parse(input); } catch { input = {}; }
@@ -147,7 +214,9 @@ function tool(session, name, inputValue, at) {
     command: command || null,
     path: typeof file === 'string' ? file : null,
     access: isWrite ? 'write' : isRead ? 'read' : 'unknown',
+    ...(callId ? { callId } : {}),
   });
+  if (callId) session.openCalls.set(callId, toolName);
   if (command) {
     // Only explicit operands of simple file-reading commands; no shell execution.
     for (const match of command.matchAll(/(?:^|&&|;|\|)\s*(?:cat|head|tail)\s+([^;&|\n]+)/g)) {
@@ -168,25 +237,54 @@ export function consumeObservedEvent(session, event) {
   const at = atOf(event, payload, session.lastEventAt || session.startedAt);
   if (!Number.isFinite(Date.parse(at))) return;
   if (Date.parse(at) < Date.parse(session.startedAt)) session.startedAt = at;
+  session.eventAgent = session.provider === 'claude' && event.isSidechain === true ? textValue(event.agentId) || 'subagent'
+    : session.provider === 'copilot' ? textValue(event.agentId || payload.agentId)
+      : session.provider === 'codex' ? session.codexAgent : null;
 
   if (session.provider === 'codex') {
     if (event.type === 'session_meta') {
       session.nativeId = payload.id || payload.session_id || session.nativeId;
       session.workspace = payload.cwd || session.workspace;
       session.startedAt = toIsoTimestamp(payload.timestamp, at);
+      // A thread spawned by another one is a subagent: it joins its parent run.
+      if (payload.source?.subagent && textValue(payload.parent_thread_id, 200)) {
+        session.parentNativeId = payload.parent_thread_id;
+        session.codexAgent = textValue(session.nativeId, 200);
+        session.agentName = textValue(payload.agent_nickname, 120) || textValue(payload.agent_path, 120);
+      }
     }
     if (event.type === 'turn_context') {
       session.model = payload.model || session.model;
       session.workspace = payload.cwd || session.workspace;
+      modelSettings(session, at, { effort: payload.effort, reasoningSummary: payload.summary });
+      session.detail.policies = {
+        approval: textValue(payload.approval_policy), sandbox: textValue(payload.sandbox_policy?.type),
+        collaborationMode: textValue(payload.collaboration_mode?.mode),
+      };
     }
+    if (event.type === 'compacted') compaction(session, at);
     if (event.type === 'token_usage_record') {
       const usage = usageFrom(payload.thread_token_usage);
       if (usage) { session.usage = usage; session.usageScope = 'session'; record(session, 'agent.usage', at, { text: 'Usage updated', usage }); }
     }
     if (event.type === 'event_msg') {
       if (payload.type === 'task_started') started(session, toIsoTimestamp(payload.started_at, at));
-      if (payload.type === 'task_complete') completed(session, toIsoTimestamp(payload.completed_at, at));
+      if (payload.type === 'task_complete') {
+        completed(session, toIsoTimestamp(payload.completed_at, at));
+        if (finite(payload.duration_ms) || finite(payload.time_to_first_token_ms)) session.detail.turns.push({
+          durationMs: finite(payload.duration_ms) ? payload.duration_ms : null,
+          firstTokenMs: finite(payload.time_to_first_token_ms) ? payload.time_to_first_token_ms : null,
+        });
+        if (payload.error) bump(session.detail, 'apiErrors');
+      }
+      if (payload.type === 'item_completed' && once(session.detail, payload.item?.id)) {
+        const item = payload.item || {};
+        const failed = item.status === 'failed' || (finite(item.exit_code) && item.exit_code !== 0) || item.result?.isError === true;
+        if (item.type === 'CommandExecution') { bump(session.detail, 'failedCommands', failed ? 1 : 0); bump(session.detail, 'toolResults'); }
+        if (item.type === 'McpToolCall') { bump(session.detail, 'failedTools', failed ? 1 : 0); bump(session.detail, 'toolResults'); countInto(session.detail.mcpServers, textValue(item.server)); }
+      }
       if (payload.type === 'turn_aborted') {
+        countInto(session.detail.abortReasons, textValue(payload.reason) || 'unreported');
         session.status = 'stopped'; session.endedAt = at;
         record(session, 'agent.cancelled', at, { text: 'Turn interrupted' });
       }
@@ -201,13 +299,43 @@ export function consumeObservedEvent(session, event) {
         appendResponse(session, payload.message, true);
         record(session, 'agent.output', at, { text: textOf(payload.message) || 'Agent response' });
       }
+      if (payload.type === 'context_compacted') compaction(session, at);
       if (payload.type === 'token_count') {
         const usage = usageFrom(payload.info?.total_token_usage);
+        const last = payload.info?.last_token_usage;
+        const context = finite(last?.total_tokens) ? last.total_tokens
+          : finite(last?.input_tokens) && finite(last?.output_tokens) ? last.input_tokens + last.output_tokens : null;
+        if (usage && context !== null) usage.contextTokens = context;
+        if (usage && finite(payload.info?.model_context_window)) usage.contextWindowTokens = payload.info.model_context_window;
+        const total = payload.info?.total_token_usage;
+        const totalTokens = finite(total?.total_tokens) ? total.total_tokens : finite(total?.input_tokens) && finite(total?.output_tokens) ? total.input_tokens + total.output_tokens : null;
+        // Each model response reports its own usage once; a repeated count of
+        // an unchanged total is not another request.
+        if (last && totalTokens !== null && totalTokens !== session.detail.lastTotal) {
+          session.detail.lastTotal = totalTokens;
+          addModelUsage(session.detail.models, session.model, {
+            requests: 1, input: last.input_tokens, cached: last.cached_input_tokens, cacheWrite: last.cache_write_input_tokens,
+            output: last.output_tokens, reasoning: last.reasoning_output_tokens,
+          });
+        }
+        if (usage && finite(total?.cache_write_input_tokens)) usage.cacheWrite = total.cache_write_input_tokens;
+        const limits = payload.rate_limits;
+        for (const name of ['primary', 'secondary']) {
+          const window = limits?.[name];
+          if (!finite(window?.used_percent)) continue;
+          const entry = session.detail.rateLimits[name] ||= { window: name, windowMinutes: finite(window.window_minutes) ? window.window_minutes : null, startPercent: window.used_percent, endPercent: window.used_percent, resetsAt: window.resets_at ?? null, reset: false };
+          // A window that reset during the session no longer measures what the session used.
+          if ((window.resets_at ?? null) !== entry.resetsAt) entry.reset = true;
+          entry.endPercent = window.used_percent;
+        }
+        if (textValue(limits?.plan_type)) session.detail.plan = textValue(limits.plan_type);
         if (usage) { session.usage = usage; session.usageScope = 'session'; record(session, 'agent.usage', at, { text: 'Usage updated', usage }); }
       }
     }
     if (event.type === 'response_item') {
       if (payload.type === 'message' && payload.role === 'user') {
+        const instructions = textOf(payload.content).match(/^# AGENTS\.md instructions for ([^\n]+)/);
+        if (instructions) memoryLoaded(session, at, `${instructions[1].trim().replace(/[\\/]$/, '')}/AGENTS.md`);
         const prompt = promptText(payload.content);
         if (prompt && !/^\s*<(environment_context|permissions|instructions)/.test(prompt) && !prompt.startsWith('# AGENTS.md')) {
           session.initialPrompt ||= prompt;
@@ -222,7 +350,20 @@ export function consumeObservedEvent(session, event) {
         session.status = 'running'; session.endedAt = null;
         record(session, 'agent.thinking', at, { text: 'Reasoning in progress (content not exposed)' });
       }
-      if (payload.type === 'function_call' || payload.type === 'custom_tool_call') tool(session, payload.name, payload.arguments || payload.input, at);
+      if (payload.type === 'function_call' || payload.type === 'custom_tool_call') tool(session, payload.name, payload.arguments || payload.input, at, textValue(payload.call_id, 200));
+      if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') toolDone(session, at, textValue(payload.call_id, 200), codexExitCode(payload.output) > 0);
+      // A spawned agent is known once Codex answers with its id; a refused
+      // spawn answers with text and lists nothing. A fork inherits the model.
+      if (payload.type === 'function_call' && payload.name === 'spawn_agent') session.detail.spawns.set(payload.call_id, payload.arguments);
+      if (payload.type === 'function_call_output' && session.detail.spawns.has(payload.call_id)) {
+        let args = {}, spawned = {};
+        try { args = JSON.parse(session.detail.spawns.get(payload.call_id)) || {}; } catch { /* unreadable arguments */ }
+        try { spawned = JSON.parse(typeof payload.output === 'string' ? payload.output : payload.output?.content || '') || {}; } catch { /* refused spawn */ }
+        if (textValue(spawned.agent_id, 200)) addAgentUsage(session.detail.agents, spawned.agent_id, {
+          name: [textValue(spawned.nickname, 60), textValue(args.agent_type, 60)].filter(Boolean).join(' · ') || null,
+          model: textValue(args.model, 200) || session.model, source: 'subagent-event',
+        });
+      }
       if (payload.type === 'message' && payload.role === 'assistant' && payload.phase === 'final_answer') {
         appendResponse(session, payload.content, true);
         record(session, 'agent.output', at, { text: textOf(payload.content), final: true });
@@ -232,7 +373,30 @@ export function consumeObservedEvent(session, event) {
   }
 
   if (session.provider === 'claude') {
+    // A subagent writes its own log under <session>/subagents/ with the parent
+    // session id; it is its own snapshot that joins the parent as an agent.
+    if (!session.nativeId && event.sessionId && event.isSidechain === true && /[\\/]subagents[\\/]/.test(session.filename)) {
+      session.parentNativeId = event.sessionId;
+      session.nativeId = `${event.sessionId}:${event.agentId || path.basename(session.filename, '.jsonl')}`;
+    }
     session.nativeId ||= event.sessionId || '';
+    if (event.type === 'user' && Array.isArray(event.message?.content)) {
+      for (const block of event.message.content.filter((item) => item?.type === 'tool_result')) {
+        toolDone(session, at, textValue(block.tool_use_id, 200), block.is_error === true);
+        if (!once(session.detail, block.tool_use_id || `${event.uuid}:${block.tool_use_id}`)) continue;
+        bump(session.detail, 'toolResults');
+        bump(session.detail, 'failedTools', block.is_error === true ? 1 : 0);
+      }
+    }
+    if (event.type === 'permission-mode') session.detail.permissionMode = textValue(event.permissionMode);
+    if (event.type === 'cost-state') {
+      const detail = session.detail;
+      detail.reportedCostUsd = finite(event.totalCostUSD) ? event.totalCostUSD : detail.reportedCostUsd;
+      detail.apiDurationMs = finite(event.totalAPIDuration) ? event.totalAPIDuration : detail.apiDurationMs;
+      detail.apiDurationWithoutRetriesMs = finite(event.totalAPIDurationWithoutRetries) ? event.totalAPIDurationWithoutRetries : detail.apiDurationWithoutRetriesMs;
+      if (finite(event.totalLinesAdded) || finite(event.totalLinesRemoved)) detail.codeChanges = { linesAdded: event.totalLinesAdded ?? null, linesRemoved: event.totalLinesRemoved ?? null, files: null };
+      for (const [model, value] of Object.entries(event.modelUsage || {})) if (finite(value?.costUSD)) detail.modelCosts[model] = value.costUSD;
+    }
     session.workspace = event.cwd || session.workspace;
     if (event.type === 'user' && !event.toolUseResult) {
       const value = typeof event.message?.content === 'string' ? event.message.content : event.message?.content;
@@ -242,6 +406,8 @@ export function consumeObservedEvent(session, event) {
       const text = textOf(value);
       // Slash-command echoes and their caveat are terminal chatter, not the prompt.
       const chatter = event.isMeta === true || /^\s*<(?:command-name|command-message|local-command-)/.test(text);
+      const effort = text.match(/<command-name>\/effort<\/command-name>[\s\S]*?<command-args>([^<]{1,40})<\/command-args>/);
+      if (effort) modelSettings(session, at, { effort: effort[1] });
       if (!chatter) {
         session.task = text;
         session.initialPrompt ||= session.task;
@@ -254,19 +420,38 @@ export function consumeObservedEvent(session, event) {
       const message = event.message || {};
       session.model = message.model && message.model !== '<synthetic>' ? message.model : session.model;
       const usage = usageFrom(message.usage, true);
+      const effort = textValue(event.perTurnEffort) || textValue(event.effort);
+      if (effort) modelSettings(session, at, { effort });
+      if (event.isApiErrorMessage === true && once(session.detail, `api-error:${event.uuid}`)) bump(session.detail, 'apiErrors');
       if (usage && message.id) {
-        session.messages.set(message.id, usage);
+        const raw = message.usage || {};
+        session.messages.set(message.id, {
+          ...usage, model: message.model && message.model !== '<synthetic>' ? message.model : session.model,
+          cacheWrite: finite(raw.cache_creation_input_tokens) ? raw.cache_creation_input_tokens : null,
+          cache5m: raw.cache_creation?.ephemeral_5m_input_tokens ?? null, cache1h: raw.cache_creation?.ephemeral_1h_input_tokens ?? null,
+          thinking: raw.output_tokens_details?.thinking_tokens ?? null,
+          webSearches: raw.server_tool_use?.web_search_requests ?? null, webFetches: raw.server_tool_use?.web_fetch_requests ?? null,
+          serviceTier: textValue(raw.service_tier), stopReason: textValue(message.stop_reason),
+          cacheMiss: message.diagnostics?.cache_miss_reason || null,
+          agentId: event.isSidechain === true ? event.agentId || 'sidechain' : null,
+        });
+        // Each request carries the whole prompt, so the last main-agent request
+        // is what the context window holds; subagents have their own window.
+        if (event.isSidechain !== true) session.contextTokens = usage.input + usage.output;
         session.usage = [...session.messages.values()].reduce((total, item) => ({
           input: total.input + item.input,
           output: total.output + item.output,
           cached: total.cached + item.cached,
+          cacheWrite: total.cacheWrite + (finite(item.cacheWrite) ? item.cacheWrite : 0),
           reasoning: null, cost: null, source: 'provider-log', costSource: null,
-        }), { input: 0, output: 0, cached: 0 });
+        }), { input: 0, output: 0, cached: 0, cacheWrite: 0 });
+        if (session.contextTokens !== null) session.usage.contextTokens = session.contextTokens;
         session.usageScope = session.clipped ? 'observed' : 'session';
         record(session, 'agent.usage', at, { text: 'Cumulative usage', usage: session.usage });
       }
       for (const block of Array.isArray(message.content) ? message.content : []) {
-        if (block.type === 'tool_use') tool(session, block.name, block.input, at);
+        if (block.type === 'tool_use') tool(session, block.name, block.input, at, textValue(block.id, 200));
+        if (block.type === 'thinking' || block.type === 'redacted_thinking') record(session, 'agent.thinking', at, { text: 'Extended thinking (content not exposed)' });
         if (block.type === 'text') {
           appendResponse(session, block.text, true);
           record(session, 'agent.output', at, { text: block.text || 'Agent response' });
@@ -275,6 +460,8 @@ export function consumeObservedEvent(session, event) {
       if (message.stop_reason === 'end_turn' || message.stop_reason === 'stop_sequence') completed(session, at);
     }
     if (event.type === 'system' && event.subtype === 'turn_duration') completed(session, at);
+    if (event.type === 'system' && event.subtype === 'compact_boundary') compaction(session, at, event.compactMetadata || {});
+    if (event.type === 'attachment' && /memory/i.test(event.attachment?.type || '') && typeof event.attachment?.path === 'string') memoryLoaded(session, at, event.attachment.path);
     if (event.type === 'result') event.is_error ? failed(session, at, 'The session reported an error') : completed(session, at);
     if (event.type === 'custom-title' && typeof event.customTitle === 'string') { session.title = short(event.customTitle, 80); session.titleLocked = true; }
     if (event.type === 'ai-title' && typeof event.aiTitle === 'string' && !session.titleLocked) session.title = short(event.aiTitle, 80);
@@ -287,8 +474,14 @@ export function consumeObservedEvent(session, event) {
       session.workspace = payload.context?.cwd || session.workspace;
       session.model = payload.selectedModel || session.model;
       session.startedAt = toIsoTimestamp(payload.startTime, at);
+      modelSettings(session, at, { effort: payload.reasoningEffort });
+      session.detail.contextTier = textValue(payload.contextTier) || session.detail.contextTier;
     }
-    if (event.type === 'session.model_change') session.model = payload.newModel || session.model;
+    if (event.type === 'session.model_change') {
+      session.detail.modelChanges.push({ at, from: textValue(payload.previousModel, 200), to: textValue(payload.newModel, 200), effort: textValue(payload.reasoningEffort), source: textValue(payload.source) });
+      session.model = payload.newModel || session.model;
+      modelSettings(session, at, { effort: payload.reasoningEffort ?? payload.newReasoningEffort });
+    }
     if (event.type === 'user.message') {
       // Copilot delivers subagent prompts as user messages too; only the ones
       // without an agentId come from the person at the terminal.
@@ -297,7 +490,26 @@ export function consumeObservedEvent(session, event) {
       record(session, 'agent.input', at, { text: session.task, userAction });
     }
     if (event.type === 'assistant.turn_start') started(session, at);
-    if (event.type === 'tool.execution_start') tool(session, payload.toolName, payload.arguments, at);
+    if (event.type === 'tool.execution_start') tool(session, payload.toolName, payload.arguments, at, textValue(payload.toolCallId, 200));
+    if (event.type === 'tool.execution_complete') toolDone(session, at, textValue(payload.toolCallId, 200), payload.success === false);
+    if (event.type === 'tool.execution_complete' && once(session.detail, payload.toolCallId || event.id)) {
+      bump(session.detail, 'toolResults');
+      bump(session.detail, 'failedTools', payload.success === false ? 1 : 0);
+    }
+    if (event.type === 'session.auto_mode_resolved') session.detail.routing.push({
+      at, chosen: textValue(payload.chosenModel, 200), method: textValue(payload.routingMethod), fallback: payload.fallback === true,
+      candidates: Array.isArray(payload.candidateModels) ? payload.candidateModels.filter((item) => typeof item === 'string').slice(0, 12) : [],
+      latencyMs: finite(payload.endToEndLatencyMs) ? payload.endToEndLatencyMs : null,
+    });
+    if (event.type === 'session.compaction_complete') {
+      compaction(session, at, { trigger: payload.trigger, preTokens: payload.preCompactionTokens });
+      const used = payload.compactionTokensUsed || {};
+      const cost = session.detail.compactionCost ||= { count: 0, tokens: null, credits: null, tokensRemoved: null };
+      cost.count++;
+      if (finite(used.inputTokens) || finite(used.outputTokens)) cost.tokens = (cost.tokens ?? 0) + (used.inputTokens || 0) + (used.outputTokens || 0);
+      if (finite(used.copilotUsage?.totalNanoAiu)) cost.credits = (cost.credits ?? 0) + used.copilotUsage.totalNanoAiu / 1_000_000_000;
+      if (finite(payload.tokensRemoved)) cost.tokensRemoved = (cost.tokensRemoved ?? 0) + payload.tokensRemoved;
+    }
     if (event.type === 'assistant.message') {
       session.model = payload.model || session.model;
       appendResponse(session, payload.content);
@@ -321,6 +533,13 @@ export function consumeObservedEvent(session, event) {
         record(session, 'agent.usage', at, { text: 'Copilot credits updated', usage });
       }
     }
+    // Keyed by the agentId its own events carry, so the schedule lane and the
+    // agent row are the same agent; a started subagent is listed before it ends.
+    if (event.type === 'subagent.started' || event.type === 'subagent.completed') addAgentUsage(session.detail.agents, textValue(event.agentId || payload.agentId, 200) || payload.toolCallId || event.id, {
+      name: textValue(payload.agentDisplayName || payload.agentName, 120), model: textValue(payload.model, 200),
+      ...(event.type === 'subagent.completed' ? { tokens: payload.totalTokens, toolCalls: payload.totalToolCalls, durationMs: payload.durationMs, cancelled: payload.cancelled } : {}),
+      source: 'subagent-event',
+    });
     if (event.type === 'subagent.completed' && finite(payload.totalTokens)) {
       const usageId = event.id || payload.toolCallId || event.agentId || `${at}:${payload.totalTokens}`;
       session.subagentUsage.set(usageId, payload.totalTokens);
@@ -344,9 +563,113 @@ export function consumeObservedEvent(session, event) {
         record(session, 'agent.usage', at, { text: 'Final Copilot usage reported', usage });
       }
       session.model = payload.currentModel || session.model;
+      copilotShutdownDetail(session.detail, payload);
       completed(session, at, 'Session completed');
     }
   }
+}
+
+// modelMetrics counts input with cache reads and writes included, as the
+// session totals do; requests.count is API calls and requests.cost premium requests.
+const copilotModelPatch = (metrics) => ({
+  requests: metrics?.requests?.count, premiumRequests: metrics?.requests?.cost,
+  input: metrics?.usage?.inputTokens, output: metrics?.usage?.outputTokens, cached: metrics?.usage?.cacheReadTokens,
+  cacheWrite: metrics?.usage?.cacheWriteTokens, reasoning: metrics?.usage?.reasoningTokens,
+  ...(finite(metrics?.totalNanoAiu) ? { credits: metrics.totalNanoAiu / 1_000_000_000, creditUnit: 'AI credits' } : {}),
+});
+
+function copilotShutdownDetail(detail, payload) {
+  if (payload.modelMetrics && typeof payload.modelMetrics === 'object') {
+    detail.shutdownModels = new Map();
+    for (const [model, metrics] of Object.entries(payload.modelMetrics)) addModelUsage(detail.shutdownModels, model, copilotModelPatch(metrics));
+  }
+  if (payload.agentMetrics && typeof payload.agentMetrics === 'object') {
+    detail.shutdownAgents = new Map();
+    for (const [id, metrics] of Object.entries(payload.agentMetrics)) {
+      const models = Object.entries(metrics?.modelMetrics || {});
+      const patches = models.map(([, value]) => copilotModelPatch(value));
+      const sum = (field) => patches.some((patch) => finite(patch[field])) ? patches.reduce((total, patch) => total + (finite(patch[field]) ? patch[field] : 0), 0) : null;
+      addAgentUsage(detail.shutdownAgents, id, {
+        name: textValue(metrics?.agentDisplayName || (id === 'main' ? 'Main agent' : metrics?.agentName || id), 120),
+        model: models.length === 1 ? textValue(models[0][0], 200) : null,
+        requests: sum('requests'), input: sum('input'), output: sum('output'), cached: sum('cached'), cacheWrite: sum('cacheWrite'),
+        ...(finite(metrics?.totalNanoAiu) ? { credits: metrics.totalNanoAiu / 1_000_000_000, creditUnit: 'AI credits' } : {}),
+        apiDurationMs: metrics?.totalApiDurationMs, source: id === 'main' ? 'main-agent' : 'agent-metrics',
+      });
+    }
+  }
+  if (finite(payload.totalPremiumRequests)) detail.premiumRequests = payload.totalPremiumRequests;
+  if (finite(payload.totalApiDurationMs)) detail.apiDurationMs = payload.totalApiDurationMs;
+  const changes = payload.codeChanges;
+  if (changes && (finite(changes.linesAdded) || finite(changes.linesRemoved))) detail.codeChanges = { linesAdded: changes.linesAdded ?? null, linesRemoved: changes.linesRemoved ?? null, files: Array.isArray(changes.filesModified) ? changes.filesModified.length : null };
+  const breakdown = { system: payload.systemTokens, conversation: payload.conversationTokens, toolDefinitions: payload.toolDefinitionsTokens, current: payload.currentTokens };
+  if (Object.values(breakdown).some(finite)) detail.contextBreakdown = Object.fromEntries(Object.entries(breakdown).map(([key, value]) => [key, finite(value) ? value : null]));
+}
+
+const median = (values) => {
+  const known = values.filter(finite).sort((a, b) => a - b);
+  if (!known.length) return null;
+  const middle = Math.floor(known.length / 2);
+  return known.length % 2 ? known[middle] : (known[middle - 1] + known[middle]) / 2;
+};
+
+// The provider details of one observed log, in the neutral shape.
+function sessionDetails(session) {
+  const detail = session.detail;
+  const shared = { failedTools: detail.failedTools, failedCommands: detail.failedCommands, apiErrors: detail.apiErrors, toolResults: detail.toolResults };
+  if (session.provider === 'claude') {
+    const messages = [...session.messages.values()];
+    const models = new Map();
+    const agents = new Map();
+    const stopReasons = {}, cacheMisses = {};
+    const sum = (field) => messages.some((item) => finite(item[field])) ? messages.reduce((total, item) => total + (finite(item[field]) ? item[field] : 0), 0) : null;
+    for (const item of messages) {
+      addModelUsage(models, item.model, { requests: 1, input: item.input, output: item.output, cached: item.cached, cacheWrite: item.cacheWrite, reasoning: item.thinking });
+      if (item.agentId) addAgentUsage(agents, item.agentId, { model: item.model, requests: 1, input: item.input, output: item.output, cached: item.cached, cacheWrite: item.cacheWrite, source: 'sidechain' });
+      countInto(stopReasons, item.stopReason);
+      if (item.cacheMiss?.type) {
+        const entry = cacheMisses[item.cacheMiss.type] ||= { count: 0, tokens: null };
+        entry.count++;
+        if (finite(item.cacheMiss.cache_missed_input_tokens)) entry.tokens = (entry.tokens ?? 0) + item.cacheMiss.cache_missed_input_tokens;
+      }
+      if (item.serviceTier) detail.serviceTiers.add(item.serviceTier);
+    }
+    for (const [model, costUsd] of Object.entries(detail.modelCosts)) if (models.has(model)) models.get(model).costUsd = costUsd;
+    const main = messages.filter((item) => !item.agentId);
+    const mainSum = (field) => main.some((item) => finite(item[field])) ? main.reduce((total, item) => total + (finite(item[field]) ? item[field] : 0), 0) : null;
+    return providerDetails('claude', {
+      models, ...shared, stopReasons, cacheMisses,
+      agents: withMainAgent(agents, { model: session.model, requests: main.length || null, input: mainSum('input'), output: mainSum('output'), cached: mainSum('cached'), cacheWrite: mainSum('cacheWrite') }),
+      cacheWrite5m: sum('cache5m'), cacheWrite1h: sum('cache1h'), webSearches: sum('webSearches'), webFetches: sum('webFetches'),
+      serviceTiers: [...detail.serviceTiers], permissionMode: detail.permissionMode, reportedCostUsd: detail.reportedCostUsd,
+      apiDurationMs: detail.apiDurationMs, apiDurationWithoutRetriesMs: detail.apiDurationWithoutRetriesMs, codeChanges: detail.codeChanges,
+    });
+  }
+  if (session.provider === 'codex') {
+    const rateLimits = Object.values(detail.rateLimits).map(({ resetsAt, ...entry }) => ({
+      ...entry, consumedPercent: entry.reset ? null : Math.max(0, entry.endPercent - entry.startPercent),
+    }));
+    return providerDetails('codex', {
+      models: detail.models, ...shared, rateLimits, policies: detail.policies, plan: detail.plan,
+      agents: withMainAgent(detail.agents, { model: session.model, input: session.usage?.input, output: session.usage?.output, cached: session.usage?.cached }),
+      abortReasons: detail.abortReasons, mcpServers: detail.mcpServers,
+      turnTimings: detail.turns.length ? {
+        turns: detail.turns.length,
+        medianFirstTokenMs: median(detail.turns.map((turn) => turn.firstTokenMs)),
+        medianTurnMs: median(detail.turns.map((turn) => turn.durationMs)),
+      } : null,
+    });
+  }
+  if (session.provider === 'copilot') {
+    return providerDetails('copilot', {
+      models: detail.shutdownModels || new Map(),
+      agents: withMainAgent(mergeAgents([...detail.agents.values()], [...(detail.shutdownAgents?.values() || [])]), { model: session.model }),
+      ...shared, routing: detail.routing.slice(-50), modelChanges: detail.modelChanges.slice(-50),
+      compactionCost: detail.compactionCost, premiumRequests: detail.premiumRequests, apiDurationMs: detail.apiDurationMs,
+      codeChanges: detail.codeChanges, contextBreakdown: detail.contextBreakdown, contextTier: detail.contextTier,
+    });
+  }
+  return null;
 }
 
 export function observedSnapshot(session, now = Date.now()) {
@@ -369,6 +692,8 @@ export function observedSnapshot(session, now = Date.now()) {
     usageScope: session.usageScope,
     sourcePath: session.filename,
     clipped: session.clipped,
+    providerDetails: sessionDetails(session),
+    parentNativeSessionId: session.parentNativeId,
   };
 }
 
@@ -580,6 +905,7 @@ export function createSessionObserver({
               activeDurationMs: summary.activeDurationMs,
               sourcePath: target.session.filename, clipped: target.session.clipped,
               sourceKind: 'opentelemetry',
+              providerDetails: summary.providerDetails,
             };
             const signature = JSON.stringify(snapshot);
             if (target.otelSignatures.get(summary.conversationId) === signature) continue;
@@ -592,7 +918,14 @@ export function createSessionObserver({
           continue;
         }
         if (!target.session.nativeId) continue;
+        // Claude Code names a subagent in the .meta.json beside its log; its
+        // first prompt is the task, not the agent.
+        if (target.session.parentNativeId && target.agentMeta === undefined) {
+          target.agentMeta = await readFile(target.session.filename.replace(/\.jsonl$/, '.meta.json'), 'utf8').then(JSON.parse).catch(() => null);
+        }
         const snapshot = observedSnapshot(target.session, now());
+        const agentName = textValue(target.agentMeta?.description, 120) || textValue(target.agentMeta?.agentType, 120) || target.session.agentName;
+        if (agentName) snapshot.name = agentName;
         const signature = JSON.stringify(snapshot);
         if (signature !== target.signature || target.session.events.length) {
           const events = target.session.events.splice(0);
