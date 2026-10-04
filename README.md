@@ -28,7 +28,10 @@ ChatGPT/Codex · Claude Code · GitHub Copilot CLI · Hermes Agent — without s
 
 Nostraxis is a local dashboard to observe, launch and compare work done with general-purpose agents. It brings **ChatGPT/Codex**, **Claude Code**, **GitHub Copilot CLI** and observed **Hermes Agent** sessions into a single view, without sending your history to a Nostraxis service and without replacing each provider's own authentication.
 
-![Nostraxis session observability dashboard](docs/dashboard-overview.png)
+
+https://github.com/user-attachments/assets/8bc82212-14c4-496a-b168-4c0d86666048
+
+
 
 It is designed for two ways of working:
 
