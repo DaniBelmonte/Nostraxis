@@ -41,7 +41,7 @@ It is designed for two ways of working:
 | --- | --- |
 | 🔌 **Multi-provider** | Codex, Claude Code, Copilot CLI and Hermes Agent in one view, with their connection status. |
 | 🧭 **Own and external sessions** | Launch sessions from the dashboard or discover the ones already in your local histories. |
-| ⚖️ **Compare** | Contrast up to four real sessions: model, tokens, cost, duration, tools and files. |
+| ⚖️ **Compare** | Contrast up to five sessions, local or imported from another Nostraxis: deviations from the group median, why a run costs more, models, agents and provider-specific signals. |
 | 📊 **Analytics** | Aggregates by repository, provider, model and date range. |
 | 🔒 **Local-first** | SQLite on your disk, no telemetry of its own and no custody of provider credentials. |
 | 🧪 **R&D Lab** | Reproducible variant matrix with a SHA-256 digest (optional). |
@@ -162,7 +162,7 @@ When you select a session, the central panel shows its timeline and, when the so
 
 ## Comparing prompts, agents and sessions
 
-The **Compare** view contrasts up to four real sessions. It is useful both for reviewing different prompts and for running the same prompt several times to evaluate different agents, models or permissions.
+The **Compare** view contrasts up to five sessions. It is useful both for reviewing different prompts and for running the same prompt several times to evaluate different agents, models or permissions.
 
 ### Recommended flow for a controlled test
 
@@ -172,7 +172,21 @@ The **Compare** view contrasts up to four real sessions. It is useful both for r
 4. Go to **Compare**, search sessions by project, model or date, and select them.
 5. Read the results together with the `Context digest`, the output and the files/tools used; a difference in context or task can invalidate a cost or speed comparison.
 
-The matrix shows model, input/output tokens, estimated cost, provider credits, duration, cache, reasoning, evaluation, tools, files, context digest and final answer when present. From each column you can open the session detail. Fields the provider did not supply stay as **Not reported**.
+Each compared run keeps one colour in every chart. Every measurement is compared with the **median of the compared runs** (with two runs, their mean); provider credits are compared only between runs that report the same credit unit. The comparison opens with a summary card per run and a list of **comparability notes** (different models, reasoning effort, prompts, repositories, context windows or credit units), then splits into tabs:
+
+- **Deviations:** one tile per headline measurement (total tokens, provider credits, estimated cost, active time, model requests, tool calls) with each run's value and its deviation from the median.
+- **Timeline:** a schematic full run for each compared run, one lane per kind of work (model, read, search, edit, shell, web, MCP, delegation, and one lane per subagent), on a minute axis of active time or wall clock, with 1× to 8× zoom. Every run fills the width with its own duration, so a ten-minute run is read as closely as a one-hour one. Each bar is one tool call from its start to its end as the provider logged them: calls that ran at the same time stack in their lane, subagents run beside the main agent, and a strip counts how much ran at once. Calls whose end the provider did not log are drawn as estimates and never count as parallel.
+- **Side by side:** every metric grouped by usage, cost, time, context, activity and efficiency, with the median beside every row and each run's difference from it.
+- **Models & agents:** credits, tokens or requests by model for each run, every model with its requests, tokens, credits and credits per request, the main agent and the subagents of each run (Claude Code, Codex and Copilot CLI subagent logs and VS Code `runSubagent` calls), and Copilot's auto-mode routing and model changes.
+- **Tools:** one donut per run with the tools, or the shell command families, it used; a tool keeps its colour in every run.
+- **Files:** the files each run read or modified, as a tree, with search and filters.
+- **Prompt & output:** first prompt and final response side by side.
+
+Effort, context occupancy and compactions come from the provider log where it records them: Codex reports effort and the context window on each turn, Claude Code reports the effort of each turn (and `/effort` commands), compactions and the size of every request; Copilot reports the effort chosen at start and on each model change. Fields the provider did not supply stay as **Not reported**.
+
+### Comparing runs from another machine
+
+Export a run from the session detail on any Nostraxis (the **JSONL** download button in the trace toolbar) and use **Import JSONL** in **Compare** on yours. Imported runs are stored locally in their own table: they appear only in Compare, never in Sessions or Analytics, and can be deleted from their card. The same file imported twice is one import. Costs priced by the other machine's Settings are dropped on import and recomputed with your prices, unless the provider reported the cost.
 
 For usage reports, **Analytics** aggregates sessions by repository, provider, model and date range. It includes a per-model breakdown, cost/token ratio, a time series and access to the detail of each run. This is the right view to answer, for example, which agent consumed most in a repository or how cost evolved over a week.
 
@@ -285,7 +299,11 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | `POST` | `/api/runs/:id/cancel` | Cancels a dashboard run that is still active. |
 | `POST` | `/api/session-sources/sync` | Forces discovery of external sessions. |
 | `GET` | `/api/analytics` | Filtered aggregates and time series. |
-| `GET` | `/api/compare?ids=...` | Comparable data for the chosen sessions. |
+| `GET` | `/api/compare?ids=...` | `{ runs, reference, metrics, drivers, outlier }`: comparison profiles for local run ids and `import:<id>` imports, and their deviations from the group median. |
+| `PUT` | `/api/compare/annotations/:id` | Declares the effort and a setup note of a compared run. |
+| `GET` | `/api/imports` | Runs imported from other Nostraxis exports. |
+| `POST` | `/api/imports` | Imports a full-run JSONL (`{ name, content }`, up to 64 MB). |
+| `DELETE` | `/api/imports/:id` | Deletes an imported run. |
 | `POST` | `/api/experiments` | Stores an experiment with its variants and exact context. |
 | `POST` | `/api/experiments/:id/run` | Runs the variants of an experiment. |
 | `GET` | `/api/stream` | Real-time updates through Server-Sent Events. |

@@ -1,3 +1,4 @@
+import { addAgentUsage, addModelUsage, providerDetails } from '../core/provider-details.mjs';
 import { readFile } from 'node:fs/promises';
 import { mergedDurationMs } from '../core/timing.mjs';
 
@@ -126,9 +127,25 @@ function summarizeSession(session) {
   const observedTokens = subagentInput != null || subagentOutput != null
     ? (subagentInput || 0) + (subagentOutput || 0)
     : null;
+  // Each span names the model it ran on; credits are attributed only where the
+  // span reports them, which is the top-level agent.
+  const models = new Map(), agents = new Map();
+  for (const span of spans) {
+    addModelUsage(models, span.model, {
+      input: span.input, output: span.output, cached: span.cacheRead, cacheWrite: span.cacheWrite, reasoning: span.reasoning,
+      ...(span.isTopLevel && finite(span.nanoAiu) ? { credits: span.nanoAiu / 1_000_000_000, creditUnit: 'AI credits' } : {}),
+    });
+    if (!span.isTopLevel) addAgentUsage(agents, span.agentName || span.key, {
+      name: span.agentName || null, model: span.model || null, input: span.input, output: span.output,
+      tokens: finite(span.input) || finite(span.output) ? (span.input || 0) + (span.output || 0) : null,
+      durationMs: Number.isFinite(span.startedAt) && Number.isFinite(span.endedAt) ? span.endedAt - span.startedAt : null,
+      source: 'opentelemetry',
+    });
+  }
   return {
     conversationId: session.conversationId,
     model,
+    providerDetails: providerDetails('copilot', { models, agents }),
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     endedAt: ends.length ? new Date(Math.max(...ends)).toISOString() : null,
     activeDurationMs,

@@ -20,6 +20,10 @@ export const api = {
     return request(`/api/analytics?${query}`);
   },
   compare: (ids) => request(`/api/compare?ids=${ids.map(encodeURIComponent).join(',')}`),
+  annotateComparison: (key, body) => request(`/api/compare/annotations/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  imports: () => request('/api/imports'),
+  importRun: (name, content) => request('/api/imports', { method: 'POST', body: JSON.stringify({ name, content }) }),
+  deleteImport: (id) => request(`/api/imports/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   createRun: (body) => request('/api/runs', { method: 'POST', body: JSON.stringify(body) }),
   cancelRun: (id) => request(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   evaluateRun: (id, body) => request(`/api/runs/${encodeURIComponent(id)}/evaluation`, { method: 'POST', body: JSON.stringify(body) }),
