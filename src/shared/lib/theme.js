@@ -1,8 +1,8 @@
 // Colours that SVG and Recharts need as literals. They mirror the tokens in styles.css.
-export const ink = { text: '#102a43', text2: '#243b53', muted: '#486581', faint: '#5a7189' };
+export const ink = { text: '#102a43', text2: '#243b53', muted: '#486581', faint: '#516880' };
 export const surface = { panel: '#ffffff', panel2: '#eef3fa', panel3: '#e3eaf3', bg: '#f4f7fb' };
 export const line = { grid: '#e3eaf3', axis: '#d9e2ee', strong: '#b8c6d8' };
-export const status = { ok: '#15803d', warn: '#b45309', err: '#c62828', accent: '#1565c0' };
+export const status = { ok: '#12733a', warn: '#a84d08', err: '#c62828', accent: '#1565c0' };
 
 // Validated light-mode categorical palette; a colour follows its entity, never its rank.
 export const series = { blue: '#2a78d6', orange: '#eb6834', aqua: '#1baf7a', yellow: '#eda100', magenta: '#e87ba4', violet: '#6250d6' };
