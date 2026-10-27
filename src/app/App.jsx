@@ -107,7 +107,7 @@ export function App() {
     {activeNav === 'Analytics' && <AnalyticsView initial={data.analytics} repositories={data.repositories} />}
     {activeNav === 'Compare' && <CompareView runs={data.runs} focusId={selectedSession} onInspect={inspect} />}
     {data.features?.experiments === true && activeNav === 'R&D Lab' && <LabView data={data} reload={reload} setError={setError} />}
-    {activeNav === 'Repos' && <RepositoriesView repositories={data.repositories} reload={reload} setError={setError} />}
+    {activeNav === 'Repos' && <RepositoriesView repositories={data.repositories} runs={data.runs} reload={reload} setError={setError} />}
     {activeNav === 'Settings' && <SettingsView data={data} reload={reload} />}
     </div>
     </div>
