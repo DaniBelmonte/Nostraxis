@@ -100,7 +100,7 @@ export function App() {
     <TopBar section={activeNav} online={!loadError} error={loadError} providerUsage={data.providerUsage} pricing={data.pricing} onSync={sync} onNewSession={() => setModal('new')} />
     <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={paneWidths}>
     {activeNav === 'Sessions' && <>
-      <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} sessionsWidth={sessionsPaneWidth ?? 270} onResizeStart={startSessionsResize} onResizeKeyDown={adjustSessionsPane} />
+      <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} sessionsWidth={sessionsPaneWidth ?? 270} onResizeStart={startSessionsResize} onResizeKeyDown={adjustSessionsPane} />
       <MainTrace detail={detail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Repos')} />
       <ContextPane detail={detail} tab={contextTab} onTab={setContextTab} contextWidth={contextPaneWidth ?? 392} onResizeStart={startContextResize} onResizeKeyDown={adjustContextPane} />
     </>}

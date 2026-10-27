@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowsClockwise, ArrowsOut, Brain, CaretDown, CaretRight, ChartLine, Check, Code, Copy,
+  ArrowsOut, Brain, CaretDown, CaretRight, ChartLine, Check, Code, Copy,
   Database, DownloadSimple, FileCode, FileText, Pause, Play, TerminalWindow,
   Warning, X,
 } from '@phosphor-icons/react';
@@ -14,13 +14,12 @@ import { SessionCard } from '../../../shared/components/SessionCard';
 import { api } from '../../../shared/api/client';
 import { ink, line, series } from '../../../shared/lib/theme';
 
-export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync, sessionsWidth, onResizeStart, onResizeKeyDown }) {
+export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, sessionsWidth, onResizeStart, onResizeKeyDown }) {
   const [scope, setScope] = useState('all');
   const [groupMode, setGroupMode] = useState('project');
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState({ project: 'All', provider: 'All', model: 'All', workload: 'All', state: 'All', origin: 'All', age: 'Any', cost: 'Any', cache: 'Any' });
   const [openGroups, setOpenGroups] = useState({ live: true, attention: true, completed: true });
-  const [syncing, setSyncing] = useState(false);
   const [dates, setDates] = useState({ from: '', to: '' });
   const isHermesSelected = filters.provider === 'hermes';
   useEffect(() => {
@@ -74,7 +73,6 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
         && (filters.cache === 'Any' || (filters.cache === '< 40%' ? metric.cacheHit != null && metric.cacheHit < .4 : metric.cacheHit != null && metric.cacheHit > .6));
     }) })).filter((group) => group.sessions.length), [groups, query, filters, dates]);
   const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-  const sync = async () => { setSyncing(true); try { await onSync(); } finally { setSyncing(false); } };
   const availableSources = sources.filter((source) => source.available);
   const availableProviders = [...new Set(availableSources.map((source) => source.provider))];
   const [moreOpen, setMoreOpen] = useState(false);
@@ -101,8 +99,8 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
 
   return <aside className="sessions-pane">
     <PaneResizeHandle className="sessions-resize-handle" label="Resize sessions panel" direction={1} min={240} max={560} width={sessionsWidth} onResizeStart={onResizeStart} onResizeKeyDown={onResizeKeyDown} />
-    <div className="sessions-heading"><h1>Sessions</h1><div className="sessions-heading-actions"><button className="icon-button" onClick={sync} disabled={syncing} aria-label="Sync external sessions" title="Sync external sessions"><ArrowsClockwise className={syncing ? 'spinning' : ''} /></button><button className="secondary-button" onClick={onNewSession}>+ New session</button></div></div>
-    <div className="session-tabs" role="tablist">{tabs.map(([id, label, count]) => <button key={id} className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{label} <span>{count}</span></button>)}</div>
+    <div className="sessions-heading"><h1>Sessions</h1><span className="sessions-total">{runs.length}</span></div>
+    <div className="session-tabs" role="tablist" aria-label="Session scope">{tabs.map(([id, label, count]) => <button key={id} role="tab" aria-selected={scope === id} className={scope === id ? 'active' : ''} onClick={() => setScope(id)}>{label} <span>{count}</span></button>)}</div>
     <div className="session-source-strip"><span><i className={availableSources.length ? 'online' : ''} />{externalSessionCount} external</span><small>{availableSources.length ? `${availableProviders.join(' · ')} live` : 'No local sources detected'}</small></div>
     <div className="sessions-controls">
       <FilterBar
@@ -121,7 +119,7 @@ export function SessionsPane({ runs, sources, externalSessionCount, selected, on
       </div>
     </div>
     <div className="session-list">{!runs.length && <div className="sessions-empty"><Database /><strong>No sessions</strong><span>Sync Codex, Claude, Copilot or Hermes, or start a session here.</span></div>}{visibleGroups.map((group) => <section key={group.id} className="session-group">
-      <button className="group-heading" onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}><span>{group.label} ({group.sessions.length})</span>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}</button>
+      <button className="group-heading" aria-expanded={openGroups[group.id] !== false} onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: current[group.id] === false }))}>{openGroups[group.id] !== false ? <CaretDown /> : <CaretRight />}<span>{group.label}</span><small>{group.sessions.length}</small></button>
       {openGroups[group.id] !== false && group.sessions.map((session) => <SessionCard key={session.id} session={session} selected={selected === session.id} onSelect={onSelect} />)}
     </section>)}</div>
   </aside>;
@@ -293,11 +291,11 @@ export function MainTrace({ detail, hasRuns, paused, onPause, onCompare, onRawEv
     </header>
     <section className="trace-summary">
       <div className="trace-summary-copy"><h2>{paused ? 'Visual stream paused' : eventText(lastEvent) || run.prompt} <span>· {duration(metrics.durationMs)}</span></h2></div>
-      <div className="metric-switch"><button className={metric === 'tokens' ? 'active' : ''} onClick={() => setMetric('tokens')}>Tokens</button><button className={metric === 'cost' ? 'active' : ''} onClick={() => setMetric('cost')}>Cost</button>{Number.isFinite(metrics.credits) && <button className={metric === 'credits' ? 'active' : ''} onClick={() => setMetric('credits')}>Credits</button>}</div>
+      <div className="metric-switch" role="group" aria-label="Chart metric"><button aria-pressed={metric === 'tokens'} className={metric === 'tokens' ? 'active' : ''} onClick={() => setMetric('tokens')}>Tokens</button><button aria-pressed={metric === 'cost'} className={metric === 'cost' ? 'active' : ''} onClick={() => setMetric('cost')}>Cost</button>{Number.isFinite(metrics.credits) && <button aria-pressed={metric === 'credits'} className={metric === 'credits' ? 'active' : ''} onClick={() => setMetric('credits')}>Credits</button>}</div>
       <div className="inline-metrics">{Number.isFinite(metrics.total) ? <><span><i className="dot blue" />Cumulative input<strong>{compact(metrics.input)}</strong></span><span><i className="dot purple" />Cumulative output<strong>{compact(metrics.output)}</strong></span></> : <><span><i className="dot blue" />Context in use<strong>{compact(metrics.contextTokens)}</strong></span><span><i className="dot purple" />Session total<strong>Not reported</strong></span></>}<span><i className="dot green" />{Number.isFinite(metrics.credits) ? metrics.creditUnit || 'Provider credits' : 'Cumulative cost'}<strong>{Number.isFinite(metrics.credits) ? `${credits(metrics.credits)}${Number.isFinite(metrics.cost) ? ` · ${money(metrics.cost)}` : ''}` : money(metrics.cost)}</strong></span></div>
     </section>
     <TraceChart mode={metric} detail={detail} />
-    <div className="detail-body"><div className="detail-tabs">{[['timeline','Timeline'],['conversation','Conversation'],['commands','Commands'],['warnings',`Warnings (${detail.warnings?.length || 0})`]].map(([id,label])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</div>{view==='timeline' && <EventStream events={events} paused={paused} onRawEvent={onRawEvent} runId={run.id} />}{view==='conversation' && <Conversation detail={detail} />}{view==='commands' && <CommandChart commands={detail.commands} />}{view==='warnings' && <div className="warning-list"><p>Heuristic rules for observed paths and commands. They do not prove data leakage.</p>{detail.warnings?.length ? detail.warnings.map((w,i)=><button key={i} onClick={()=>onRawEvent(events.find(e=>e.id===w.eventId))}><Warning /><span>{w.message}<code>{w.target}</code></span></button>) : <p>No matches with sensitivity rules were detected.</p>}</div>}</div>
+    <div className="detail-body"><div className="detail-tabs" role="tablist" aria-label="Session detail">{[['timeline','Timeline'],['conversation','Conversation'],['commands','Commands'],['warnings',`Warnings (${detail.warnings?.length || 0})`]].map(([id,label])=><button key={id} role="tab" aria-selected={view===id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</div>{view==='timeline' && <EventStream events={events} paused={paused} onRawEvent={onRawEvent} runId={run.id} />}{view==='conversation' && <Conversation detail={detail} />}{view==='commands' && <CommandChart commands={detail.commands} />}{view==='warnings' && <div className="warning-list"><p>Heuristic rules for observed paths and commands. They do not prove data leakage.</p>{detail.warnings?.length ? detail.warnings.map((w,i)=><button key={i} onClick={()=>onRawEvent(events.find(e=>e.id===w.eventId))}><Warning /><span>{w.message}<code>{w.target}</code></span></button>) : <p>No matches with sensitivity rules were detected.</p>}</div>}</div>
   </main>;
 }
 
@@ -375,7 +373,7 @@ export function ContextPane({ detail, tab, onTab, contextWidth, onResizeStart, o
   const tabs = [['knowledge', 'Context'], ['metrics', 'Metrics'], ['tools', 'Tools']];
   return <aside className="context-pane">
     {resizeHandle}
-    <div className="context-tabs">{tabs.map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => onTab(id)}>{label}</button>)}</div>
+    <div className="context-tabs" role="tablist" aria-label="Session inspector">{tabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => onTab(id)}>{label}</button>)}</div>
     {tab === 'knowledge' && <div className="context-scroll">
       <section className="context-section"><h3>Session summary</h3><dl className="session-facts">
         <dt>Name</dt><dd>{run.name}</dd><dt>Provider</dt><dd><code>{run.provider}</code></dd><dt>Project</dt><dd><a>{run.repositoryName || '—'}</a></dd>
