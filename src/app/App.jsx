@@ -3,6 +3,7 @@ import { Code, Robot, X } from '@phosphor-icons/react';
 import { api } from '../shared/api/client';
 import { ContextPane, MainTrace, NewRunForm, SessionsPane } from '../features/sessions';
 import { AnalyticsView } from '../features/analytics';
+import { OverviewView } from '../features/overview';
 import { CompareView } from '../features/compare';
 import { LabView } from '../features/experiments';
 import { RepositoriesView } from '../features/repositories';
@@ -20,7 +21,7 @@ import '@fontsource/jetbrains-mono/500.css';
 
 export function App() {
   const { data, error: loadError, reload } = useDashboard();
-  const [activeNav, setActiveNav] = useState('Sessions');
+  const [activeNav, setActiveNav] = useState('Overview');
   const [selectedSession, setSelectedSession] = useState('');
   const [detail, setDetail] = useState(null);
   const [paused, setPaused] = useState(false);
@@ -104,6 +105,7 @@ export function App() {
       <MainTrace detail={detail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Repos')} />
       <ContextPane detail={detail} tab={contextTab} onTab={setContextTab} contextWidth={contextPaneWidth ?? 392} onResizeStart={startContextResize} onResizeKeyDown={adjustContextPane} />
     </>}
+    {activeNav === 'Overview' && <OverviewView data={data} onInspect={inspect} onNavigate={setActiveNav} />}
     {activeNav === 'Analytics' && <AnalyticsView initial={data.analytics} repositories={data.repositories} />}
     {activeNav === 'Compare' && <CompareView runs={data.runs} focusId={selectedSession} onInspect={inspect} />}
     {data.features?.experiments === true && activeNav === 'R&D Lab' && <LabView data={data} reload={reload} setError={setError} />}
