@@ -61,7 +61,7 @@ export function App() {
     const shell = shellRef.current;
     if (!shell) return Math.max(240, Math.min(560, width));
     const contextWidth = window.innerWidth > 1080 ? measure('.context-pane', 392) : 0;
-    const maximum = Math.max(240, Math.min(560, shell.clientWidth - measure('.app-rail', 68) - contextWidth - minimumTraceWidth()));
+    const maximum = Math.max(240, Math.min(560, shell.clientWidth - contextWidth - minimumTraceWidth()));
     return Math.max(240, Math.min(maximum, Math.round(width)));
   };
   const trackPaneResize = (event, minimumViewport, onMove) => {
