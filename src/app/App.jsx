@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Code, Robot, X } from '@phosphor-icons/react';
 import { api } from '../shared/api/client';
 import { ContextPane, MainTrace, NewRunForm, SessionsPane } from '../features/sessions';
-import { ProviderUsageDock } from '../features/provider-usage';
 import { AnalyticsView } from '../features/analytics';
 import { CompareView } from '../features/compare';
 import { LabView } from '../features/experiments';
 import { RepositoriesView } from '../features/repositories';
 import { SettingsView } from '../features/settings';
-import { AppRail } from './components/AppRail';
+import { AppSidebar } from './components/AppSidebar';
 import { Modal } from './components/Modal';
+import { TopBar } from './components/TopBar';
 import { useDashboard } from './hooks/useDashboard';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
@@ -53,7 +53,7 @@ export function App() {
   const constrainContextPaneWidth = (width) => {
     const shell = shellRef.current;
     if (!shell) return Math.max(300, Math.min(760, width));
-    const maximum = Math.max(300, Math.min(760, shell.clientWidth - measure('.app-rail', 68) - measure('.sessions-pane', 270) - minimumTraceWidth()));
+    const maximum = Math.max(300, Math.min(760, shell.clientWidth - measure('.sessions-pane', 270) - minimumTraceWidth()));
     return Math.max(300, Math.min(maximum, Math.round(width)));
   };
   const constrainSessionsPaneWidth = (width) => {
@@ -90,9 +90,15 @@ export function App() {
   };
 
   if (!data) return <div className="boot-screen"><Robot weight="duotone" /><h1>Nostraxis</h1><p>{loadError || 'Starting local runtime, API and SQLite…'}</p></div>;
-  return <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={paneWidths}>
-    <AppRail active={activeNav} onChange={setActiveNav} online={!loadError} experimentsEnabled={data.features?.experiments === true} />
-    <ProviderUsageDock initial={data.providerUsage} pricing={data.pricing} />
+  const sync = async () => {
+    try { await api.syncSessions(); await reload(); }
+    catch (reason) { setError(reason.message); }
+  };
+  return <div className="console-shell">
+    <AppSidebar active={activeNav} onChange={setActiveNav} online={!loadError} experimentsEnabled={data.features?.experiments === true} sessions={data.runs.length} repositories={data.repositories.length} />
+    <div className="console-main">
+    <TopBar section={activeNav} online={!loadError} error={loadError} providerUsage={data.providerUsage} pricing={data.pricing} onSync={sync} onNewSession={() => setModal('new')} />
+    <div ref={shellRef} className={`observatory-shell ${activeNav !== 'Sessions' ? 'workspace-shell' : ''}`} style={paneWidths}>
     {activeNav === 'Sessions' && <>
       <SessionsPane runs={data.runs} sources={data.sessionSources || []} externalSessionCount={data.externalSessionCount || 0} selected={selectedSession} onSelect={setSelectedSession} onNewSession={() => setModal('new')} onSync={async () => { await api.syncSessions(); await reload(); }} sessionsWidth={sessionsPaneWidth ?? 270} onResizeStart={startSessionsResize} onResizeKeyDown={adjustSessionsPane} />
       <MainTrace detail={detail} hasRuns={data.runs.length > 0} paused={paused} onPause={() => setPaused((value) => !value)} onCancel={cancel} onCompare={() => setActiveNav('Compare')} onRawEvent={setRawEvent} onEmptyAction={() => setActiveNav('Repos')} />
@@ -103,6 +109,8 @@ export function App() {
     {data.features?.experiments === true && activeNav === 'R&D Lab' && <LabView data={data} reload={reload} setError={setError} />}
     {activeNav === 'Repos' && <RepositoriesView repositories={data.repositories} reload={reload} setError={setError} />}
     {activeNav === 'Settings' && <SettingsView data={data} reload={reload} />}
+    </div>
+    </div>
 
     {actionError && <div className="toast-error"><WarningIcon />{actionError}<button onClick={() => setActionError('')}><X /></button></div>}
     {modal === 'new' && <Modal title="New session" onClose={() => setModal(null)}><NewRunForm data={data} onError={setError} onCreated={(run) => { setSelectedSession(run.id); setModal(null); reload(); }} /></Modal>}
