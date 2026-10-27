@@ -4,17 +4,18 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 import { ChartTooltip } from '../../../shared/components/Observability';
 import { compact } from '../../../shared/lib/metrics';
+import { neutral, providerColors, series } from '../../../shared/lib/theme';
 
-const PROVIDER_COLORS = { claude: '#eb6834', codex: '#1baf7a', copilot: '#6250d6', hermes: '#eda100', unknown: '#8d8b85' };
+const PROVIDER_COLORS = providerColors;
 const CATEGORIES = [
-  ['file system', 'File system', '#2a78d6'],
-  ['search', 'Search', '#eb6834'],
-  ['edit', 'Edit', '#1baf7a'],
-  ['process', 'Process', '#eda100'],
-  ['git', 'Git', '#e87ba4'],
-  ['navigation', 'Navigation', '#6250d6'],
-  ['environment', 'Environment', '#8e9aa6'],
-  ['other', 'Other', '#6b6a66'],
+  ['file system', 'File system', series.blue],
+  ['search', 'Search', series.orange],
+  ['edit', 'Edit', series.aqua],
+  ['process', 'Process', series.yellow],
+  ['git', 'Git', series.magenta],
+  ['navigation', 'Navigation', series.violet],
+  ['environment', 'Environment', neutral.soft],
+  ['other', 'Other', neutral.strong],
 ];
 const TOP_ROWS = 8;
 

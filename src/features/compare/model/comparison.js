@@ -1,21 +1,22 @@
 import { compact, credits, duration, money, percent } from '../../../shared/lib/metrics';
+import { neutral, runColors, series, status } from '../../../shared/lib/theme';
 
 // One fixed hue per comparison slot, in selection order; adjacent slots are
 // validated for colour vision deficiency on the dark comparison surface. A
 // run keeps its colour when another one is removed because the colour follows
 // the slot. Five hues cannot all stay apart under every deficiency, so runs
 // are always labelled by name beside their colour.
-export const RUN_COLORS = ['#2e95e6', '#c28427', '#9a6fe0', '#2fa877', '#cc66aa'];
+export const RUN_COLORS = runColors;
 export const MAX_COMPARED_RUNS = RUN_COLORS.length;
 
 // Models get their own categorical ramp so a model is never read as a run.
-export const MODEL_COLORS = ['#1baf7a', '#eb6834', '#6250d6', '#eda100', '#e87ba4', '#2a78d6', '#e34948'];
-export const OTHER_MODEL_COLOR = '#807e79';
+export const MODEL_COLORS = [series.aqua, series.orange, series.violet, series.yellow, series.magenta, series.blue, status.err];
+export const OTHER_MODEL_COLOR = neutral.soft;
 
 // Diverging scale for deviations: below the median cool, above warm, a grey
 // midpoint for "as the median".
-export const DEVIATION_BELOW = '#2a78d6';
-export const DEVIATION_ABOVE = '#e34948';
+export const DEVIATION_BELOW = series.blue;
+export const DEVIATION_ABOVE = status.err;
 
 const finite = Number.isFinite;
 const count = (value) => finite(value) ? value.toLocaleString('en-US') : '—';

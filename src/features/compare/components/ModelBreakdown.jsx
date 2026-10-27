@@ -4,6 +4,7 @@ import { compact, duration } from '../../../shared/lib/metrics';
 import { Segmented } from './CompareCharts';
 import { RunHeading } from './MetricMatrix';
 import { MODEL_COLORS, OTHER_MODEL_COLOR, formatValue, runLabel } from '../model/comparison';
+import { axisTick, cursorFill, ink, line, surface } from '../../../shared/lib/theme';
 
 const finite = Number.isFinite;
 const OTHER = 'Other models';
@@ -93,11 +94,11 @@ export function ModelBreakdown({ rows, colors }) {
       <div className="compare-legend">{models.map((model, index) => <span key={model}><i style={{ background: colorOf(model, index) }} />{model}</span>)}</div>
       <div className="compare-chart-body" style={{ height: data.length * 44 + 40 }}>
         <ResponsiveContainer width="100%" height="100%"><BarChart data={data} layout="vertical" margin={{ top: 4, right: 18, left: 4, bottom: 4 }} barCategoryGap={10}>
-          <CartesianGrid stroke="#ababab" horizontal={false} />
-          <XAxis type="number" stroke="#393939" tickLine={false} tick={{ fontSize: 10, fill: '#2e2e2e' }} axisLine={{ stroke: '#9e9e9e' }} tickFormatter={measure.format} />
-          <YAxis type="category" dataKey="name" width={150} stroke="#393939" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 10, fill: '#1c1c1c' }} tickFormatter={(value) => value.length > 22 ? `${value.slice(0, 21)}…` : value} />
-          <Tooltip content={<StackTooltip format={measure.format} />} cursor={{ fill: '#adadad33' }} isAnimationActive={false} />
-          {models.map((model, index) => <Bar key={model} dataKey={model} stackId="models" fill={colorOf(model, index)} stroke="#b6b6b6" strokeWidth={2} maxBarSize={22} isAnimationActive={false} />)}
+          <CartesianGrid stroke={line.grid} horizontal={false} />
+          <XAxis type="number" stroke={ink.faint} tickLine={false} tick={axisTick} axisLine={{ stroke: line.axis }} tickFormatter={measure.format} />
+          <YAxis type="category" dataKey="name" width={150} stroke={ink.faint} tickLine={false} axisLine={false} interval={0} tick={{ ...axisTick, fill: ink.text2 }} tickFormatter={(value) => value.length > 22 ? `${value.slice(0, 21)}…` : value} />
+          <Tooltip content={<StackTooltip format={measure.format} />} cursor={{ fill: cursorFill }} isAnimationActive={false} />
+          {models.map((model, index) => <Bar key={model} dataKey={model} stackId="models" fill={colorOf(model, index)} stroke={surface.panel} strokeWidth={2} maxBarSize={22} isAnimationActive={false} />)}
         </BarChart></ResponsiveContainer>
       </div>
       {charted.length < rows.length && <p className="unavailable-note compare-chart-note">{rows.length - charted.length} of {rows.length} runs do not report {measure.label.toLowerCase()} per model and are not drawn.</p>}

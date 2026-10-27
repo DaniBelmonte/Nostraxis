@@ -11,8 +11,12 @@ import { SettingsView } from '../features/settings';
 import { AppRail } from './components/AppRail';
 import { Modal } from './components/Modal';
 import { useDashboard } from './hooks/useDashboard';
-import '@fontsource/space-mono/400.css';
-import '@fontsource/space-mono/700.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
 
 export function App() {
   const { data, error: loadError, reload } = useDashboard();

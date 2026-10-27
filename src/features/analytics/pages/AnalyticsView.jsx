@@ -12,6 +12,7 @@ import { CommandUsage } from '../components/CommandUsage';
 import { ConnectionsPanel } from '../components/ConnectionsPanel';
 import { compact, duration, money, percent } from '../../../shared/lib/metrics';
 import { PageShell } from '../../workspace/pages/WorkspaceViews';
+import { axisTick, cursorFill, ink, line, series } from '../../../shared/lib/theme';
 
 const DAY = 86400000;
 const RANGES = [
@@ -21,7 +22,7 @@ const RANGES = [
   { id: 'all', label: 'All time', days: null },
 ];
 const GRANULARITIES = [{ id: 'daily', label: 'Daily' }, { id: 'weekly', label: 'Weekly' }, { id: 'monthly', label: 'Monthly' }];
-const SERIES = { tokens: { name: 'Session tokens', color: '#2a78d6' }, observed: { name: 'Agents (included)', color: '#eb6834' } };
+const SERIES = { tokens: { name: 'Session tokens', color: series.blue }, observed: { name: 'Agents (included)', color: series.orange } };
 
 const addNullable = (total, value) => (Number.isFinite(value) ? (total ?? 0) + value : total);
 const change = (current, previous) => (Number.isFinite(current) && Number.isFinite(previous) && previous > 0 ? (current - previous) / previous : null);
@@ -295,12 +296,12 @@ export function AnalyticsView({ initial, repositories }) {
         <div className="analytics-chart">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={series} margin={{ top: 6, right: 12, left: 4, bottom: 4 }} barCategoryGap="28%">
-              <CartesianGrid stroke="#aaaaaa" vertical={false} />
-              <XAxis dataKey="label" stroke="#434343" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />
-              <YAxis stroke="#434343" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} width={54} tickFormatter={metric === 'cost' ? money : compact} />
-              <Tooltip cursor={{ fill: '#adadad66' }} content={<UsageTooltip metric={metric} />} />
+              <CartesianGrid stroke={line.grid} vertical={false} />
+              <XAxis dataKey="label" stroke={ink.faint} tickLine={false} axisLine={false} tick={axisTick} interval="preserveStartEnd" minTickGap={24} />
+              <YAxis stroke={ink.faint} tickLine={false} axisLine={false} tick={axisTick} width={54} tickFormatter={metric === 'cost' ? money : compact} />
+              <Tooltip cursor={{ fill: cursorFill }} content={<UsageTooltip metric={metric} />} />
               {metric === 'cost'
-                ? <Bar name="Cost" dataKey="cost" fill="#1baf7a" radius={[3, 3, 0, 0]} />
+                ? <Bar name="Cost" dataKey="cost" fill={series.aqua} radius={[3, 3, 0, 0]} />
                 : <>
                   {visibleSeries.observed && <Bar name={SERIES.observed.name} dataKey="observedTokens" stackId="usage" fill={SERIES.observed.color} />}
                   {visibleSeries.tokens && <Bar name={SERIES.tokens.name} dataKey="sessionOnly" stackId="usage" fill={SERIES.tokens.color} radius={[3, 3, 0, 0]} />}
@@ -309,7 +310,7 @@ export function AnalyticsView({ initial, repositories }) {
           </ResponsiveContainer>
         </div>
         <div className="analytics-legend">
-          {(metric === 'cost' ? [{ name: 'Cost', color: '#1baf7a' }] : Object.entries(SERIES).filter(([id]) => visibleSeries[id]).map(([, item]) => item))
+          {(metric === 'cost' ? [{ name: 'Cost', color: series.aqua }] : Object.entries(SERIES).filter(([id]) => visibleSeries[id]).map(([, item]) => item))
             .map((item) => <span key={item.name}><i style={{ background: item.color }} />{item.name}</span>)}
         </div>
       </> : <p className="empty-evidence">No runs in this period.</p>}

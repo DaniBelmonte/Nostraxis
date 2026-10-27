@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { compact, money } from '../lib/metrics';
+import { palette } from '../lib/theme';
 
-export const colors = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#6250d6'];
+export const colors = palette;
 export function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return <div className="readable-tooltip"><strong>{label || payload[0]?.payload?.name || payload[0]?.payload?.model || 'Measurement'}</strong>{payload.filter(p => p.value != null).map((p,i) => <div key={i}><span style={{ color: p.color }}>{p.name || p.dataKey}</span><b>{/cost/i.test(p.dataKey || p.name) ? money(p.value) : compact(p.value)}</b><small>{Number(p.value).toLocaleString('en-GB', { maximumFractionDigits: 6 })}</small></div>)}</div>;

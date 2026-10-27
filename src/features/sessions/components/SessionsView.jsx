@@ -12,6 +12,7 @@ import { Conversation, CommandChart } from '../../../shared/components/Observabi
 import { FilterBar } from '../../../shared/components/FilterBar';
 import { SessionCard } from '../../../shared/components/SessionCard';
 import { api } from '../../../shared/api/client';
+import { ink, line, series } from '../../../shared/lib/theme';
 
 export function SessionsPane({ runs, sources, externalSessionCount, selected, onSelect, onNewSession, onSync, sessionsWidth, onResizeStart, onResizeKeyDown }) {
   const [scope, setScope] = useState('all');
@@ -179,20 +180,20 @@ function TraceChart({ mode, detail }) {
   const spansDays = visiblePoints.length > 1 && visiblePoints.at(-1).at - visiblePoints[0].at >= 86_400_000;
   const xDomain = visiblePoints.length === 1 ? [visiblePoints[0].at - 30_000, visiblePoints[0].at + 30_000] : ['dataMin', 'dataMax'];
   const seriesName = mode === 'cost' ? 'Cumulative cost' : 'Cumulative credits';
-  const seriesColor = mode === 'tokens' ? '#2a78d6' : mode === 'cost' ? '#1baf7a' : '#eda100';
+  const seriesColor = mode === 'tokens' ? series.blue : mode === 'cost' ? series.aqua : series.yellow;
   return <section className="trace-chart-panel" aria-label={`${label} over time`}>
-    <div className="chart-topbar"><div className="chart-legend">{mode === 'tokens' ? <><span><i style={{ background: '#1baf7a' }} />Context</span><span><i style={{ background: '#2a78d6' }} />Input</span><span><i style={{ background: '#eb6834' }} />Output</span></> : <span><i style={{ background: seriesColor }} />{seriesName}</span>}<small>{isZeroFallback ? (mode === 'cost' && points.length ? 'Usage reported but not priced · set prices in Settings' : 'No provider usage reported · showing zero') : `${visiblePoints.length} measurements`}</small></div><ChartInspector point={inspectedPoint} mode={mode} /></div>
+    <div className="chart-topbar"><div className="chart-legend">{mode === 'tokens' ? <><span><i style={{ background: series.aqua }} />Context</span><span><i style={{ background: series.blue }} />Input</span><span><i style={{ background: series.orange }} />Output</span></> : <span><i style={{ background: seriesColor }} />{seriesName}</span>}<small>{isZeroFallback ? (mode === 'cost' && points.length ? 'Usage reported but not priced · set prices in Settings' : 'No provider usage reported · showing zero') : `${visiblePoints.length} measurements`}</small></div><ChartInspector point={inspectedPoint} mode={mode} /></div>
     <div className="chart-wrap">
     <ResponsiveContainer width="100%" height="100%"><ComposedChart data={chartPoints} margin={{ top: 12, right: 18, left: 4, bottom: 6 }} onMouseMove={(state) => setActivePoint(state?.activePayload?.[0]?.payload || null)} onMouseLeave={() => setActivePoint(null)}>
-      <defs><linearGradient id="trace-chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={mode === 'tokens' ? '#2a78d6' : seriesColor} stopOpacity={.45} /><stop offset="100%" stopColor={mode === 'tokens' ? '#2a78d6' : seriesColor} stopOpacity={0} /></linearGradient></defs>
-      <CartesianGrid stroke="#a7a7a7" vertical strokeDasharray="0" />
-      <XAxis type="number" scale="time" domain={xDomain} dataKey="at" stroke="#393939" tickLine={false} axisLine={{ stroke: '#9e9e9e' }} tick={{ fontSize: 10, fontFamily: 'Space Mono' }} tickCount={6} minTickGap={32} tickFormatter={(value) => new Date(value).toLocaleString([], spansDays ? { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' })} />
-      <YAxis yAxisId="left" width={54} domain={paddedChartDomain(chartPoints.flatMap((point) => mode === 'tokens' ? [point.contextTokens, point.input, point.output] : [point[mode]]).map((value) => Number.isFinite(value) ? value : 0))} stroke="#393939" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} tickFormatter={mode === 'cost' ? money : mode === 'credits' ? credits : compact} />
-      <Tooltip content={<CompactChartTooltip mode={mode} />} cursor={{ stroke: '#484848', strokeDasharray: '3 3' }} offset={10} isAnimationActive={false} wrapperStyle={{ pointerEvents: 'none', zIndex: 4 }} />
+      <defs><linearGradient id="trace-chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={mode === 'tokens' ? series.blue : seriesColor} stopOpacity={.45} /><stop offset="100%" stopColor={mode === 'tokens' ? series.blue : seriesColor} stopOpacity={0} /></linearGradient></defs>
+      <CartesianGrid stroke={line.grid} vertical strokeDasharray="0" />
+      <XAxis type="number" scale="time" domain={xDomain} dataKey="at" stroke={ink.faint} tickLine={false} axisLine={{ stroke: line.axis }} tick={{ fontSize: 10, fontFamily: 'JetBrains Mono' }} tickCount={6} minTickGap={32} tickFormatter={(value) => new Date(value).toLocaleString([], spansDays ? { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' })} />
+      <YAxis yAxisId="left" width={54} domain={paddedChartDomain(chartPoints.flatMap((point) => mode === 'tokens' ? [point.contextTokens, point.input, point.output] : [point[mode]]).map((value) => Number.isFinite(value) ? value : 0))} stroke={ink.faint} tickLine={false} axisLine={false} tick={{ fontSize: 10 }} tickFormatter={mode === 'cost' ? money : mode === 'credits' ? credits : compact} />
+      <Tooltip content={<CompactChartTooltip mode={mode} />} cursor={{ stroke: ink.faint, strokeDasharray: '3 3' }} offset={10} isAnimationActive={false} wrapperStyle={{ pointerEvents: 'none', zIndex: 4 }} />
       {mode === 'tokens'
-        ? <><Area yAxisId="left" name="Input" type="stepAfter" dataKey="input" stroke="#2a78d6" strokeWidth={2} fill="url(#trace-chart-fill)" dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls />
-            <Line yAxisId="left" name="Context" type="stepAfter" dataKey="contextTokens" stroke="#1baf7a" strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
-            <Line yAxisId="left" name="Output" type="stepAfter" dataKey="output" stroke="#eb6834" strokeWidth={2} dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls /></>
+        ? <><Area yAxisId="left" name="Input" type="stepAfter" dataKey="input" stroke={series.blue} strokeWidth={2} fill="url(#trace-chart-fill)" dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls />
+            <Line yAxisId="left" name="Context" type="stepAfter" dataKey="contextTokens" stroke={series.aqua} strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls />
+            <Line yAxisId="left" name="Output" type="stepAfter" dataKey="output" stroke={series.orange} strokeWidth={2} dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls /></>
         : <Area yAxisId="left" name={seriesName} type="stepAfter" dataKey={mode} stroke={seriesColor} strokeWidth={2} fill="url(#trace-chart-fill)" dot={visiblePoints.length <= 2} isAnimationActive={false} connectNulls />}
     </ComposedChart></ResponsiveContainer>
     </div>

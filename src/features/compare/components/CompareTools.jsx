@@ -3,6 +3,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { Segmented } from './CompareCharts';
 import { RunHeading } from './MetricMatrix';
 import { MODEL_COLORS, OTHER_MODEL_COLOR } from '../model/comparison';
+import { surface } from '../../../shared/lib/theme';
 
 const OTHER = 'Other';
 const MODES = {
@@ -50,7 +51,7 @@ export function CompareTools({ rows, colors }) {
           {total ? <>
             <div className="tools-pie-chart">
               <ResponsiveContainer width="100%" height="100%"><PieChart>
-                <Pie data={slices} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={1} stroke="#b6b6b6" strokeWidth={2} isAnimationActive={false}>
+                <Pie data={slices} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={1} stroke={surface.panel} strokeWidth={2} isAnimationActive={false}>
                   {slices.map((slice) => <Cell key={slice.name} fill={colorOf(slice.name)} />)}
                 </Pie>
                 <Tooltip content={<SliceTooltip />} isAnimationActive={false} />
