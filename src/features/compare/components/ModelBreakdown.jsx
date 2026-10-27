@@ -93,11 +93,11 @@ export function ModelBreakdown({ rows, colors }) {
       <div className="compare-legend">{models.map((model, index) => <span key={model}><i style={{ background: colorOf(model, index) }} />{model}</span>)}</div>
       <div className="compare-chart-body" style={{ height: data.length * 44 + 40 }}>
         <ResponsiveContainer width="100%" height="100%"><BarChart data={data} layout="vertical" margin={{ top: 4, right: 18, left: 4, bottom: 4 }} barCategoryGap={10}>
-          <CartesianGrid stroke="#1d3141" horizontal={false} />
-          <XAxis type="number" stroke="#7590a5" tickLine={false} tick={{ fontSize: 10, fill: '#8ea5b8' }} axisLine={{ stroke: '#314657' }} tickFormatter={measure.format} />
-          <YAxis type="category" dataKey="name" width={150} stroke="#7590a5" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 10, fill: '#b8c9d6' }} tickFormatter={(value) => value.length > 22 ? `${value.slice(0, 21)}…` : value} />
-          <Tooltip content={<StackTooltip format={measure.format} />} cursor={{ fill: '#16304133' }} isAnimationActive={false} />
-          {models.map((model, index) => <Bar key={model} dataKey={model} stackId="models" fill={colorOf(model, index)} stroke="#0d202d" strokeWidth={2} maxBarSize={22} isAnimationActive={false} />)}
+          <CartesianGrid stroke="#ababab" horizontal={false} />
+          <XAxis type="number" stroke="#393939" tickLine={false} tick={{ fontSize: 10, fill: '#2e2e2e' }} axisLine={{ stroke: '#9e9e9e' }} tickFormatter={measure.format} />
+          <YAxis type="category" dataKey="name" width={150} stroke="#393939" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 10, fill: '#1c1c1c' }} tickFormatter={(value) => value.length > 22 ? `${value.slice(0, 21)}…` : value} />
+          <Tooltip content={<StackTooltip format={measure.format} />} cursor={{ fill: '#adadad33' }} isAnimationActive={false} />
+          {models.map((model, index) => <Bar key={model} dataKey={model} stackId="models" fill={colorOf(model, index)} stroke="#b6b6b6" strokeWidth={2} maxBarSize={22} isAnimationActive={false} />)}
         </BarChart></ResponsiveContainer>
       </div>
       {charted.length < rows.length && <p className="unavailable-note compare-chart-note">{rows.length - charted.length} of {rows.length} runs do not report {measure.label.toLowerCase()} per model and are not drawn.</p>}

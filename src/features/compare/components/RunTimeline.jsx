@@ -16,13 +16,13 @@ const STEPS = [5e3, 10e3, 15e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 
 
 // Lane families share a hue; the lane label carries the exact kind of work.
 const FAMILIES = [
-  ['model', 'Model', '#5d7383', (lane) => lane === 'model'],
-  ['read', 'Read & search', '#199e70', (lane) => lane === 'read' || lane === 'search'],
-  ['edit', 'Edit', '#d95926', (lane) => lane === 'edit'],
-  ['shell', 'Shell', '#9085e9', (lane) => lane === 'shell'],
-  ['web', 'Web & MCP', '#c98500', (lane) => lane === 'web' || lane === 'mcp'],
-  ['agents', 'Delegation & subagents', '#d55181', (lane) => lane === 'subagent' || lane.startsWith('agent:')],
-  ['other', 'Other tools', '#3987e5', () => true],
+  ['model', 'Model', '#6c6e74', (lane) => lane === 'model'],
+  ['read', 'Read & search', '#1baf7a', (lane) => lane === 'read' || lane === 'search'],
+  ['edit', 'Edit', '#eb6834', (lane) => lane === 'edit'],
+  ['shell', 'Shell', '#6250d6', (lane) => lane === 'shell'],
+  ['web', 'Web & MCP', '#eda100', (lane) => lane === 'web' || lane === 'mcp'],
+  ['agents', 'Delegation & subagents', '#e87ba4', (lane) => lane === 'subagent' || lane.startsWith('agent:')],
+  ['other', 'Other tools', '#2a78d6', () => true],
 ];
 const familyOf = (lane) => FAMILIES.find(([, , , test]) => test(lane));
 
@@ -88,7 +88,7 @@ function RunLanes({ row, color, extent, axis, zoom }) {
     ? levels.map((point, index) => `${index ? 'L' : 'M'}${x(point.t).toFixed(1)},${(stripTop + STRIP - (index ? levels[index - 1].level : 0) / maxLevel * (STRIP - 4)).toFixed(1)}L${x(point.t).toFixed(1)},${(stripTop + STRIP - point.level / maxLevel * (STRIP - 4)).toFixed(1)}`).join('') + `L${x(levels.at(-1).t).toFixed(1)},${stripTop + STRIP}Z`
     : null;
   const own = axis === 'active' ? schedule.activeMs : schedule.wallMs;
-  const markerColor = { input: '#e3edf3', output: '#56bcff', error: '#e66767', compaction: '#c98500' };
+  const markerColor = { input: '#0a0a0a', output: '#2a78d6', error: '#e34948', compaction: '#eda100' };
   const show = (event, item) => {
     const box = frame.current.getBoundingClientRect();
     setHover({ item, left: Math.max(0, Math.min(event.clientX - box.left + 12, box.width - 230)), top: event.clientY - box.top + 12 });
@@ -115,16 +115,16 @@ function RunLanes({ row, color, extent, axis, zoom }) {
       <div className="timeline-scroll">
         <svg width={plot} height={height} role="img" aria-label={`Schedule of ${runLabel(row)}: ${placed.map((lane) => `${lane.label} ${lane.calls} calls`).join(', ')}`}>
           {ticks.map((tick) => <g key={tick}>
-            <line x1={x(tick)} x2={x(tick)} y1={MARKER_ROW} y2={stripTop + STRIP} stroke="#1b3040" />
+            <line x1={x(tick)} x2={x(tick)} y1={MARKER_ROW} y2={stripTop + STRIP} stroke="#acacac" />
             <text x={x(tick) + 3} y={height - 6} className="timeline-tick">{clock(tick)}</text>
           </g>)}
-          {own < extent && <rect x={x(own)} y={MARKER_ROW} width={Math.max(0, plot - x(own))} height={stripTop + STRIP - MARKER_ROW} fill="#0a1720" />}
+          {own < extent && <rect x={x(own)} y={MARKER_ROW} width={Math.max(0, plot - x(own))} height={stripTop + STRIP - MARKER_ROW} fill="#bababa" />}
           {placed.map((lane, index) => <g key={lane.id}>
-            {index % 2 === 1 && <rect x={0} y={lane.top} width={plot} height={lane.height} fill="#0f2230" opacity={0.6} />}
+            {index % 2 === 1 && <rect x={0} y={lane.top} width={plot} height={lane.height} fill="#b4b4b4" opacity={0.6} />}
             {lane.windows.map((item) => <rect key={`w${item.start}`} x={x(item.start)} y={lane.top + 1} width={Math.max(2, x(item.end) - x(item.start))} height={lane.height - 2} fill={lane.family[2]} opacity={0.14} rx={3} />)}
             {lane.spans.map((item, spanIndex) => <rect key={spanIndex} x={x(item.start)} y={lane.top + 3 + item.row * (ROW + ROW_GAP)} width={Math.max(1.5, x(item.end) - x(item.start))} height={ROW} rx={2}
               fill={lane.family[2]} fillOpacity={item.estimated ? 0.35 : 0.95}
-              stroke={item.status === 'failed' ? '#ff8a8a' : item.estimated ? lane.family[2] : 'none'} strokeWidth={item.status === 'failed' ? 1.5 : 1} strokeDasharray={item.estimated ? '2 2' : undefined}
+              stroke={item.status === 'failed' ? '#c20a0a' : item.estimated ? lane.family[2] : 'none'} strokeWidth={item.status === 'failed' ? 1.5 : 1} strokeDasharray={item.estimated ? '2 2' : undefined}
               onMouseMove={(event) => show(event, { ...item, lane: lane.label })} />)}
           </g>)}
           {(schedule.markers || []).map((marker, index) => {
@@ -134,10 +134,10 @@ function RunLanes({ row, color, extent, axis, zoom }) {
                 : marker.kind === 'compaction' ? <path d={`M${at},2L${at + 4},7L${at},12L${at - 4},7Z`} fill={markerColor.compaction} />
                   : marker.kind === 'error' ? <path d={`M${at - 3},3L${at + 3},11M${at + 3},3L${at - 3},11`} stroke={markerColor.error} strokeWidth={2} />
                     : <circle cx={at} cy={7} r={2.5} fill={markerColor.output} />}
-              {marker.kind === 'input' && <line x1={at} x2={at} y1={MARKER_ROW} y2={stripTop + STRIP} stroke="#e3edf3" strokeOpacity={0.25} strokeDasharray="3 3" />}
+              {marker.kind === 'input' && <line x1={at} x2={at} y1={MARKER_ROW} y2={stripTop + STRIP} stroke="#0a0a0a" strokeOpacity={0.25} strokeDasharray="3 3" />}
             </g>;
           })}
-          {strip && <path d={strip} fill="#56bcff" fillOpacity={0.35} stroke="#56bcff" strokeWidth={1} />}
+          {strip && <path d={strip} fill="#2a78d6" fillOpacity={0.35} stroke="#2a78d6" strokeWidth={1} />}
         </svg>
       </div>
       {hover && <div className="readable-tooltip timeline-tooltip" style={{ left: hover.left, top: hover.top }}>

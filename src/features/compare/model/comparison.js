@@ -9,13 +9,13 @@ export const RUN_COLORS = ['#2e95e6', '#c28427', '#9a6fe0', '#2fa877', '#cc66aa'
 export const MAX_COMPARED_RUNS = RUN_COLORS.length;
 
 // Models get their own categorical ramp so a model is never read as a run.
-export const MODEL_COLORS = ['#199e70', '#d95926', '#9085e9', '#c98500', '#d55181', '#3987e5', '#e66767'];
-export const OTHER_MODEL_COLOR = '#6b7f8e';
+export const MODEL_COLORS = ['#1baf7a', '#eb6834', '#6250d6', '#eda100', '#e87ba4', '#2a78d6', '#e34948'];
+export const OTHER_MODEL_COLOR = '#807e79';
 
 // Diverging scale for deviations: below the median cool, above warm, a grey
 // midpoint for "as the median".
-export const DEVIATION_BELOW = '#3987e5';
-export const DEVIATION_ABOVE = '#e66767';
+export const DEVIATION_BELOW = '#2a78d6';
+export const DEVIATION_ABOVE = '#e34948';
 
 const finite = Number.isFinite;
 const count = (value) => finite(value) ? value.toLocaleString('en-US') : '—';

@@ -21,7 +21,7 @@ const RANGES = [
   { id: 'all', label: 'All time', days: null },
 ];
 const GRANULARITIES = [{ id: 'daily', label: 'Daily' }, { id: 'weekly', label: 'Weekly' }, { id: 'monthly', label: 'Monthly' }];
-const SERIES = { tokens: { name: 'Session tokens', color: '#35a7ff' }, observed: { name: 'Agents (included)', color: '#b680ff' } };
+const SERIES = { tokens: { name: 'Session tokens', color: '#2a78d6' }, observed: { name: 'Agents (included)', color: '#eb6834' } };
 
 const addNullable = (total, value) => (Number.isFinite(value) ? (total ?? 0) + value : total);
 const change = (current, previous) => (Number.isFinite(current) && Number.isFinite(previous) && previous > 0 ? (current - previous) / previous : null);
@@ -223,7 +223,7 @@ export function AnalyticsView({ initial, repositories }) {
   const dirty = range !== '30d' || custom.from || custom.to || filters.repository || filters.provider || filters.model;
   const reset = () => { setRange('30d'); setCustom({ from: '', to: '' }); setFilters({ repository: '', provider: '', model: '' }); };
 
-  return <PageShell title="Analytics" description="Understand usage, performance and quality across all your agent runs.">
+  return <PageShell className="analytics-page" title="Analytics" description="Understand usage, performance and quality across all your agent runs.">
     <div className="analytics-filter-bar">
       <FilterPill icon={<CalendarBlank />} label="" value={custom.from || custom.to ? 'custom' : range}
         options={[...RANGES.map((item) => ({ value: item.id, label: item.label })), ...(custom.from || custom.to ? [{ value: 'custom', label: rangeLabel }] : [])]}
@@ -295,12 +295,12 @@ export function AnalyticsView({ initial, repositories }) {
         <div className="analytics-chart">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={series} margin={{ top: 6, right: 12, left: 4, bottom: 4 }} barCategoryGap="28%">
-              <CartesianGrid stroke="#1d3243" vertical={false} />
-              <XAxis dataKey="label" stroke="#5f7d92" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />
-              <YAxis stroke="#5f7d92" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} width={54} tickFormatter={metric === 'cost' ? money : compact} />
-              <Tooltip cursor={{ fill: '#16303f66' }} content={<UsageTooltip metric={metric} />} />
+              <CartesianGrid stroke="#aaaaaa" vertical={false} />
+              <XAxis dataKey="label" stroke="#434343" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />
+              <YAxis stroke="#434343" tickLine={false} axisLine={false} tick={{ fontSize: 10 }} width={54} tickFormatter={metric === 'cost' ? money : compact} />
+              <Tooltip cursor={{ fill: '#adadad66' }} content={<UsageTooltip metric={metric} />} />
               {metric === 'cost'
-                ? <Bar name="Cost" dataKey="cost" fill="#43d59a" radius={[3, 3, 0, 0]} />
+                ? <Bar name="Cost" dataKey="cost" fill="#1baf7a" radius={[3, 3, 0, 0]} />
                 : <>
                   {visibleSeries.observed && <Bar name={SERIES.observed.name} dataKey="observedTokens" stackId="usage" fill={SERIES.observed.color} />}
                   {visibleSeries.tokens && <Bar name={SERIES.tokens.name} dataKey="sessionOnly" stackId="usage" fill={SERIES.tokens.color} radius={[3, 3, 0, 0]} />}
@@ -309,7 +309,7 @@ export function AnalyticsView({ initial, repositories }) {
           </ResponsiveContainer>
         </div>
         <div className="analytics-legend">
-          {(metric === 'cost' ? [{ name: 'Cost', color: '#43d59a' }] : Object.entries(SERIES).filter(([id]) => visibleSeries[id]).map(([, item]) => item))
+          {(metric === 'cost' ? [{ name: 'Cost', color: '#1baf7a' }] : Object.entries(SERIES).filter(([id]) => visibleSeries[id]).map(([, item]) => item))
             .map((item) => <span key={item.name}><i style={{ background: item.color }} />{item.name}</span>)}
         </div>
       </> : <p className="empty-evidence">No runs in this period.</p>}

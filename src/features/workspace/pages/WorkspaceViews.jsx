@@ -3,8 +3,8 @@ import { Check, FolderOpen, Play } from '@phosphor-icons/react';
 import { api } from '../../../shared/api/client';
 import { statusLabel } from '../../../shared/lib/metrics';
 
-export function PageShell({ eyebrow, title, description, children }) {
-  return <main className="workspace-page"><header className="page-header"><div>{eyebrow && <span>{eyebrow}</span>}<h1>{title}</h1><p>{description}</p></div></header><div className="page-scroll">{children}</div></main>;
+export function PageShell({ eyebrow, title, description, children, className = '' }) {
+  return <main className="workspace-page"><header className="page-header"><div>{eyebrow && <span>{eyebrow}</span>}<h1>{title}</h1><p>{description}</p></div></header><div className={`page-scroll ${className}`.trim()}>{children}</div></main>;
 }
 
 export function LabView({ data, reload, setError }) {

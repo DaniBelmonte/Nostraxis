@@ -5,16 +5,16 @@ import { PROVIDER_NAMES } from '../../../shared/components/AgentIcon';
 import { ChartTooltip } from '../../../shared/components/Observability';
 import { compact } from '../../../shared/lib/metrics';
 
-const PROVIDER_COLORS = { claude: '#69b5ed', codex: '#70c5ac', copilot: '#a69be8', hermes: '#f2c86b', unknown: '#90a9bd' };
+const PROVIDER_COLORS = { claude: '#eb6834', codex: '#1baf7a', copilot: '#6250d6', hermes: '#eda100', unknown: '#8d8b85' };
 const CATEGORIES = [
-  ['file system', 'File system', '#4aa3e8'],
-  ['search', 'Search', '#a69be8'],
-  ['edit', 'Edit', '#5cc2a0'],
-  ['process', 'Process', '#ddb879'],
-  ['git', 'Git', '#df929c'],
-  ['navigation', 'Navigation', '#7fc4f0'],
-  ['environment', 'Environment', '#9fb6c9'],
-  ['other', 'Other', '#6e8496'],
+  ['file system', 'File system', '#2a78d6'],
+  ['search', 'Search', '#eb6834'],
+  ['edit', 'Edit', '#1baf7a'],
+  ['process', 'Process', '#eda100'],
+  ['git', 'Git', '#e87ba4'],
+  ['navigation', 'Navigation', '#6250d6'],
+  ['environment', 'Environment', '#8e9aa6'],
+  ['other', 'Other', '#6b6a66'],
 ];
 const TOP_ROWS = 8;
 

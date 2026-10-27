@@ -50,7 +50,7 @@ export function CompareTools({ rows, colors }) {
           {total ? <>
             <div className="tools-pie-chart">
               <ResponsiveContainer width="100%" height="100%"><PieChart>
-                <Pie data={slices} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={1} stroke="#0d202d" strokeWidth={2} isAnimationActive={false}>
+                <Pie data={slices} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={1} stroke="#b6b6b6" strokeWidth={2} isAnimationActive={false}>
                   {slices.map((slice) => <Cell key={slice.name} fill={colorOf(slice.name)} />)}
                 </Pie>
                 <Tooltip content={<SliceTooltip />} isAnimationActive={false} />
