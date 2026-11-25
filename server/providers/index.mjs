@@ -8,7 +8,7 @@ import { describeProvider } from './base.mjs';
 import { codex } from './codex.mjs';
 import { claude } from './claude.mjs';
 import { copilot } from './copilot.mjs';
-import { custom } from './custom.mjs';
+import { custom, customProviderEnabled } from './custom.mjs';
 import { hermes } from './hermes.mjs';
 
 const exec = promisify(execFile);
@@ -35,7 +35,9 @@ export async function detectProviders() {
   const results = [];
   for (const adapter of Object.values(adapters)) {
     if (adapter.id === 'custom') {
-      results.push(describeProvider(adapter, { available: true, version: 'Open JSONL protocol' }));
+      results.push(describeProvider(adapter, customProviderEnabled()
+        ? { available: true, version: 'Open JSONL protocol' }
+        : { available: false, error: 'Set NOSTRAXIS_CUSTOM_PROVIDER=1 to enable' }));
       continue;
     }
     const executable = await findExecutable(adapter.id);

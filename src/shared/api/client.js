@@ -4,8 +4,9 @@ async function request(path, options) {
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error || `Request failed (${response.status})`);
+  if (body === null) throw new Error('The local API returned an incomplete response.');
   return body;
 }
 

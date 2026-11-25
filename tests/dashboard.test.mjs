@@ -616,6 +616,7 @@ test('invalid provider configuration becomes a failed run instead of staying que
 test('custom JSONL provider persists a complete observable run', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'nostraxis-custom-'));
   process.env.NOSTRAXIS_SEED = '0';
+  process.env.NOSTRAXIS_CUSTOM_PROVIDER = '1';
   const store = openDatabase(path.join(dir, 'data'));
   const repositories = createRepositoryService(store);
   const repository = await repositories.add(dir);
@@ -698,4 +699,14 @@ test('a Claude terminal session is named and prompted by the real prompt, not sl
   ]) consumeObservedEvent(session, event);
   assert.equal(session.initialPrompt, 'revisa los estados');
   assert.equal(session.title, 'Estados de las sesiones');
+});
+
+test('custom provider refuses to build a command unless enabled', async () => {
+  const { custom } = await import('../server/providers/custom.mjs');
+  const previous = process.env.NOSTRAXIS_CUSTOM_PROVIDER;
+  delete process.env.NOSTRAXIS_CUSTOM_PROVIDER;
+  assert.throws(() => custom.build({ prompt: 'x', executable: '/bin/echo' }), /disabled/);
+  process.env.NOSTRAXIS_CUSTOM_PROVIDER = '1';
+  assert.equal(custom.build({ prompt: 'x', executable: '/bin/echo' }).command, '/bin/echo');
+  if (previous === undefined) delete process.env.NOSTRAXIS_CUSTOM_PROVIDER; else process.env.NOSTRAXIS_CUSTOM_PROVIDER = previous;
 });

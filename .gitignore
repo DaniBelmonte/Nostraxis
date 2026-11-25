@@ -12,3 +12,5 @@ dist/
 *.swp
 *.swo
 coverage/
+.claude/
+graphify-out/

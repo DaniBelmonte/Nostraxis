@@ -272,6 +272,7 @@ export NOSTRAXIS_SESSION_MAX_AGE_DAYS=30
 | `NOSTRAXIS_VSCODE_CHAT_ROOTS_JSON` | JSON array of additional or custom VS Code `workspaceStorage` roots; replaces the platform defaults for this source. |
 | `NOSTRAXIS_PRICING_JSON` | Base per-model price table to estimate USD; prices saved in **Settings → Pricing** override it. |
 | `NOSTRAXIS_EXPERIMENTS_ENABLED=1` | Enables the R&D Lab and its experiments API. |
+| `NOSTRAXIS_CUSTOM_PROVIDER=1` | Enables the Custom JSONL provider, which runs the executable typed in **New run**. Disabled by default. |
 | `NOSTRAXIS_SESSION_ROOTS_JSON` | Replaces the history locations that are watched. |
 | `NOSTRAXIS_SESSION_MAX_FILES` | Maximum number of history files inspected. |
 | `NOSTRAXIS_SESSION_MAX_AGE_DAYS` | Maximum age of the discovered histories. |
