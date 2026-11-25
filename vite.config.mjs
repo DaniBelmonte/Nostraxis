@@ -18,7 +18,13 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    allowedHosts: ["localhost", "127.0.0.1", "terminal.local"],
+    allowedHosts: ["localhost", "127.0.0.1"],
+    // Dev serves the project root: keep local data and secrets out of reach
+    // and never answer other localhost origins.
+    cors: false,
+    fs: {
+      deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "**/.nostraxis/**", "**/.agent-dashboard/**", "**/*.sqlite*"],
+    },
     warmup: {
       clientFiles: ["./src/main.jsx"],
     },

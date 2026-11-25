@@ -13,13 +13,15 @@ const api = createApi({ dataDir: process.env.NOSTRAXIS_DATA_DIR || path.join(roo
 const vite = dev ? await (await import('vite')).createServer({ root, server: { middlewareMode: true }, appType: 'spa' }) : null;
 const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2' };
 
-const server = http.createServer(async (req, res) => {
+const handle = async (req, res) => {
   const hostname = String(req.headers.host || '').split(':')[0];
-  if (!['localhost', '127.0.0.1', 'terminal.local'].includes(hostname)) {
+  if (!['localhost', '127.0.0.1'].includes(hostname)) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
   if (await api.handle(req, res)) return;
   if (vite) { vite.middlewares(req, res); return; }
   try {
@@ -31,7 +33,12 @@ const server = http.createServer(async (req, res) => {
   } catch {
     res.writeHead(503); res.end('Run npm run build before npm start.');
   }
-});
+};
+
+const server = http.createServer((req, res) => handle(req, res).catch(() => {
+  if (!res.headersSent) res.writeHead(400);
+  res.end();
+}));
 
 server.listen(port, '127.0.0.1', () => console.log(`Nostraxis · http://localhost:${port}`));
 let stopping = false;
