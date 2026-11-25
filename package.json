@@ -33,7 +33,7 @@
     "preview": "vite preview",
     "test": "node --test tests/*.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs",
-    "check": "npm test && npm run build"
+    "check": "npm run build && npm test"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
