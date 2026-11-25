@@ -10,7 +10,7 @@ const portArg = args.indexOf('--port');
 const port = Number(portArg >= 0 ? args[portArg + 1] : process.env.PORT || 4173);
 const dev = args.includes('--dev');
 const api = createApi({ dataDir: process.env.NOSTRAXIS_DATA_DIR || path.join(root, '.nostraxis') });
-const vite = dev ? await (await import('vite')).createServer({ root, server: { middlewareMode: true }, appType: 'spa' }) : null;
+let vite = null;
 const mime = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2' };
 
 const handle = async (req, res) => {
@@ -39,6 +39,8 @@ const server = http.createServer((req, res) => handle(req, res).catch(() => {
   if (!res.headersSent) res.writeHead(400);
   res.end();
 }));
+// Attach HMR to this loopback server; Vite's standalone HMR port listens on every interface.
+if (dev) vite = await (await import('vite')).createServer({ root, server: { middlewareMode: true, hmr: { server } }, appType: 'spa' });
 
 server.listen(port, '127.0.0.1', () => console.log(`Nostraxis · http://localhost:${port}`));
 let stopping = false;
